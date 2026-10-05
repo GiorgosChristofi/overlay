@@ -1,0 +1,1 @@
+Make runes change when a new champion is hovered not when lcoked in.

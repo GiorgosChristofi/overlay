@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "comment": "Hand-curated example builds used until the v2 data pipeline exists. IDs are checked against the current patch at runtime; invalid entries are skipped with a reason shown to the player. Add champions by appending entries.",
+  "builds": [
+    {
+      "championId": 86,
+      "role": "top",
+      "runes": {
+        "primaryStyleId": 8000,
+        "subStyleId": 8400,
+        "perkIds": [8010, 9111, 9104, 8299, 8444, 8242, 5005, 5008, 5011]
+      },
+      "summonerSpells": [4, 14],
+      "itemBlocks": [
+        { "title": "Starting items", "items": [1055, 2003] },
+        { "title": "Core", "items": [3047, 3071, 3053] },
+        { "title": "Late game", "items": [6333] }
+      ]
+    },
+    {
+      "championId": 99,
+      "role": "middle",
+      "runes": {
+        "primaryStyleId": 8200,
+        "subStyleId": 8000,
+        "perkIds": [8229, 8226, 8210, 8237, 8009, 8014, 5008, 5008, 5011]
+      },
+      "summonerSpells": [4, 14],
+      "itemBlocks": [
+        { "title": "Starting items", "items": [1056, 2003] },
+        { "title": "Core", "items": [6655, 3020, 3089] },
+        { "title": "Late game", "items": [3135] }
+      ]
+    },
+    {
+      "championId": 222,
+      "role": "bottom",
+      "runes": {
+        "primaryStyleId": 8000,
+        "subStyleId": 8200,
+        "perkIds": [8008, 9101, 9104, 8017, 8233, 8236, 5005, 5008, 5011]
+      },
+      "summonerSpells": [7, 4],
+      "itemBlocks": [
+        { "title": "Starting items", "items": [1055, 2003] },
+        { "title": "Core", "items": [3006, 3031, 3094] },
+        { "title": "Late game", "items": [3046] }
+      ]
+    }
+  ]
+}

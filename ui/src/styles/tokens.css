@@ -1,0 +1,33 @@
+:root {
+  /* Palette: slate river base, one violet accent. Status colours are for results only. */
+  --bg: #13222a;
+  --surface: #1b2f38;
+  --line: #2a4350;
+  --text: #e4edef;
+  --muted: #8ba3ab;
+  --accent: #a58cff;
+  --accent-ink: #13222a;
+  --good: #6fd3a0;
+  --warn: #f0b866;
+  --bad: #f07a6e;
+
+  --font-body: "Barlow", system-ui, "Segoe UI", sans-serif;
+  --font-display: "Barlow Semi Condensed", "Barlow", system-ui, sans-serif;
+
+  /* Type scale (1.25 ratio from 15px body). */
+  --step--1: 0.8rem;
+  --step-0: 0.9375rem;
+  --step-1: 1.17rem;
+  --step-2: 1.46rem;
+  --step-3: 1.83rem;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  color-scheme: dark;
+}

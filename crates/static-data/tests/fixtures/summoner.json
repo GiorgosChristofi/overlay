@@ -1,0 +1,5 @@
+{"type":"summoner","version":"16.19.1","data":{
+ "SummonerFlash":{"id":"SummonerFlash","name":"Flash","key":"4"},
+ "SummonerDot":{"id":"SummonerDot","name":"Ignite","key":"14"},
+ "SummonerHeal":{"id":"SummonerHeal","name":"Heal","key":"7"},
+ "SummonerBrandNew":{"id":"SummonerBrandNew","name":"Mystery","key":"not-a-number"}}}

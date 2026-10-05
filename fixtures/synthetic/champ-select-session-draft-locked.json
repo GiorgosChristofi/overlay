@@ -1,0 +1,29 @@
+{
+  "actions": [
+    [
+      { "actorCellId": 0, "championId": 157, "completed": true, "id": 1, "isAllyAction": true, "isInProgress": false, "pickTurn": 1, "type": "ban" },
+      { "actorCellId": 5, "championId": 238, "completed": true, "id": 2, "isAllyAction": false, "isInProgress": false, "pickTurn": 1, "type": "ban" }
+    ],
+    [
+      { "actorCellId": 0, "championId": 86, "completed": true, "id": 11, "isAllyAction": true, "isInProgress": false, "pickTurn": 2, "type": "pick" },
+      { "actorCellId": 2, "championId": 99, "completed": true, "id": 12, "isAllyAction": true, "isInProgress": false, "pickTurn": 2, "type": "pick" }
+    ]
+  ],
+  "allowBattleBoost": false,
+  "allowRerolling": false,
+  "benchChampions": [],
+  "benchEnabled": false,
+  "chatDetails": { "multiUserChatId": "redacted", "multiUserChatPassword": "redacted" },
+  "gameId": 0,
+  "hasSimultaneousBans": true,
+  "hasSimultaneousPicks": false,
+  "isSpectating": false,
+  "localPlayerCellId": 2,
+  "myTeam": [
+    { "assignedPosition": "top", "cellId": 0, "championId": 86, "championPickIntent": 0, "gameName": "", "nameVisibilityType": "HIDDEN", "puuid": "", "spell1Id": 4, "spell2Id": 12, "summonerId": 0, "tagLine": "", "team": 1 },
+    { "assignedPosition": "middle", "cellId": 2, "championId": 99, "championPickIntent": 0, "gameName": "Tester", "nameVisibilityType": "VISIBLE", "puuid": "redacted", "spell1Id": 4, "spell2Id": 14, "summonerId": 1234, "tagLine": "EUW", "team": 1 }
+  ],
+  "theirTeam": [],
+  "timer": { "adjustedTimeLeftInPhase": 21000, "internalNowInEpochMs": 0, "isInfinite": false, "phase": "BAN_PICK", "totalTimeInPhase": 30000 },
+  "trades": []
+}

@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 4 * * *" # nightly: live Data Dragon check
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  rust:
+    name: Rust (core crates)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - name: TypeScript bindings are up to date
+        run: git diff --exit-code -- ui/src/bindings
+      - name: Seed builds valid on the live patch
+        if: github.event_name == 'schedule'
+        run: cargo test -p static-data --test seed_builds -- --ignored
+
+  deny:
+    name: Dependency licences and advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  ui:
+    name: UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  desktop:
+    name: Desktop app (Windows)
+    runs-on: windows-latest
+    needs: [rust, ui]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+        working-directory: ui
+      - run: ./scripts/fetch-riot-cert.ps1
+        shell: pwsh
+      - run: cargo clippy -p desktop --all-targets -- -D warnings
+      - run: cargo install tauri-cli --version "^2" --locked
+      - name: Build installer
+        working-directory: apps/desktop
+        run: cargo tauri build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers
+          path: target/release/bundle/**/*

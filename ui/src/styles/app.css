@@ -1,0 +1,495 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: var(--step-0);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  line-height: 1.15;
+  margin: 0;
+}
+
+h1 {
+  font-size: var(--step-3);
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  font-size: var(--step-1);
+  font-weight: 600;
+}
+
+p {
+  margin: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ---------- shell ---------- */
+
+.shell {
+  display: grid;
+  grid-template-columns: 208px 1fr;
+  height: 100%;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-5) var(--space-4);
+  border-right: 1px solid var(--line);
+}
+
+.rail-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--step-1);
+}
+
+.rail-mark {
+  width: 28px;
+  height: 28px;
+  color: var(--accent);
+}
+
+.rail-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.rail-link {
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.rail-link:hover {
+  color: var(--text);
+}
+
+.rail-link[aria-current="page"] {
+  color: var(--text);
+  border-left-color: var(--accent);
+}
+
+.rail-connection {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--step--1);
+}
+
+.rail-connection .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.rail-connection[data-connected="true"] .dot {
+  background: var(--good);
+}
+
+.page {
+  overflow-y: auto;
+  padding: var(--space-7) var(--space-7) var(--space-6);
+  max-width: 760px;
+}
+
+.loading {
+  color: var(--muted);
+}
+
+/* ---------- home ---------- */
+
+.hero {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.hero-icon {
+  border-radius: 12px;
+  border: 1px solid var(--line);
+}
+
+.hero-sub {
+  display: flex;
+  gap: var(--space-4);
+  margin-top: var(--space-1);
+  color: var(--muted);
+}
+
+/* The phase rail: the one bold element of the app. */
+.track {
+  --rail-inset: 7px;
+  position: relative;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin: var(--space-7) 0;
+  padding: 0;
+}
+
+.track::before,
+.track::after {
+  content: "";
+  position: absolute;
+  top: var(--rail-inset);
+  left: var(--rail-inset);
+  height: 2px;
+}
+
+.track::before {
+  right: calc(25% - var(--rail-inset));
+  background: var(--line);
+}
+
+.track::after {
+  width: calc((75% - 2 * var(--rail-inset)) * var(--progress));
+  background: var(--accent);
+  transition: width 400ms ease-out;
+}
+
+.track-step {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.track-node {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: var(--bg);
+}
+
+.track-step[data-state="past"] .track-node {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.track-step[data-state="current"] .track-node {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.track-label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.track-step[data-state="current"] .track-label {
+  color: var(--text);
+}
+
+.import {
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-5);
+}
+
+.import-empty p {
+  margin-top: var(--space-2);
+  color: var(--muted);
+  max-width: 52ch;
+}
+
+.import-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.import-head h2 {
+  font-size: var(--step-2);
+  font-weight: 700;
+}
+
+.import-role {
+  margin-left: var(--space-2);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.steps {
+  list-style: none;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 24px 140px 1fr;
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.step-label {
+  font-weight: 500;
+}
+
+.step-text {
+  color: var(--muted);
+}
+
+.glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 50%;
+}
+
+.glyph svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: var(--accent-ink);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.glyph[data-status="done"] {
+  background: var(--good);
+}
+
+.glyph[data-status="skipped"] {
+  background: var(--warn);
+}
+
+.glyph[data-status="failed"] {
+  background: var(--bad);
+}
+
+/* ---------- controls ---------- */
+
+.button {
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.button-quiet {
+  background: none;
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
+.form-error {
+  margin-top: var(--space-3);
+  color: var(--bad);
+}
+
+/* ---------- settings ---------- */
+
+.page-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.save-state {
+  color: var(--muted);
+  font-size: var(--step--1);
+}
+
+.save-state[data-kind="error"] {
+  color: var(--bad);
+}
+
+.settings-group + .settings-group {
+  margin-top: var(--space-6);
+}
+
+.settings-group h2 {
+  margin-bottom: var(--space-2);
+}
+
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.setting-hint {
+  color: var(--muted);
+  font-size: var(--step--1);
+}
+
+.switch {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 40px;
+  height: 22px;
+  margin: 0;
+  border-radius: 11px;
+  background: var(--line);
+  cursor: pointer;
+  transition: background 150ms;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: transform 150ms;
+}
+
+.switch:checked {
+  background: var(--accent);
+}
+
+.switch:checked::after {
+  transform: translateX(18px);
+  background: var(--accent-ink);
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.segmented button {
+  min-width: 40px;
+  padding: var(--space-1) var(--space-3);
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-family: var(--font-display);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmented button[aria-checked="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* ---------- about ---------- */
+
+.facts {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-5);
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.legal {
+  max-width: 60ch;
+  margin-bottom: var(--space-5);
+  color: var(--muted);
+  font-size: var(--step--1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track::after,
+  .switch,
+  .switch::after {
+    transition: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+  .rail {
+    flex-direction: row;
+    align-items: center;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .rail-links {
+    grid-auto-flow: column;
+  }
+  .rail-connection {
+    margin: 0 0 0 auto;
+  }
+  .page {
+    padding: var(--space-5);
+  }
+  .step {
+    grid-template-columns: 24px 1fr;
+  }
+  .step-text {
+    grid-column: 2;
+  }
+}

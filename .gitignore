@@ -1,0 +1,6 @@
+/target
+node_modules
+/ui/dist
+/apps/desktop/resources/*.pem
+/apps/desktop/gen
+*.log

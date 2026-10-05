@@ -1,0 +1,10 @@
+{
+  "actions": [],
+  "benchChampions": [{ "championId": 1, "isPriority": false }],
+  "benchEnabled": true,
+  "localPlayerCellId": 6,
+  "myTeam": [
+    { "assignedPosition": "", "cellId": 6, "championId": 222, "spell1Id": 32, "spell2Id": 4, "summonerId": 1234 }
+  ],
+  "timer": { "phase": "BAN_PICK" }
+}

@@ -3,8 +3,10 @@
 A League of Legends companion for Windows. Rust core, React UI, Tauri 2 shell.
 
 **Phase 1** (this code): connects to the League client, shows your profile and
-the session phase, and when you lock in a champion it sets your rune page, item
-set and summoner spells. The in-game overlay is Phase 2.
+the session phase, and as soon as you hover or lock in a champion it sets your
+rune page, item set and summoner spells from OP.GG statistics for your role (or ARAM). The
+app lists OP.GG's top rune pages with win and pick rates and draws each as a
+rune tree; hover a rune to see what it does, click a page to switch to it. The in-game overlay is Phase 2.
 
 LoL Overlay is not endorsed by Riot Games and does not reflect the views or
 opinions of Riot Games or anyone officially involved in producing or managing
@@ -26,8 +28,8 @@ cd apps/desktop; cargo tauri dev     # starts Vite and the app
 Start League of Legends; the app connects within a couple of seconds.
 Release installer: `cargo tauri build` in `apps/desktop`.
 
-No Riot API key is needed for Phase 1: it only uses the local client and Data
-Dragon. Register on the Riot Developer Portal before sharing the app with anyone.
+No Riot API key is needed for Phase 1: it only uses the local client, Data
+Dragon and OP.GG. Register on the Riot Developer Portal before sharing the app with anyone.
 
 ### Working on the UI without League
 
@@ -41,11 +43,12 @@ uses sample data; pick a scene with `?state=disconnected`, `lobby`,
 crates/domain        pure rules and port traits, no I/O
 crates/lcu-client    League client: discovery, TLS, REST, WAMP events
 crates/static-data   Data Dragon download + per-patch disk cache
+crates/opgg          OP.GG champion statistics -> builds (runes, spells, items)
 crates/app-core      session service and champ-select import
 crates/ipc-types     DTOs shared with React; generates ui/src/bindings
 apps/desktop         Tauri shell: window, tray, commands
 ui/                  React + TypeScript (Vite)
-data/builds          seed builds (schema-versioned JSON)
+data/builds          seed builds, used when OP.GG is unreachable
 fixtures/            payloads for contract tests
 docs/adr/            architecture decisions
 ```
@@ -58,10 +61,11 @@ with in-memory fakes.
 
 | Command | What it runs |
 | --- | --- |
-| `cargo test` | 86 Rust tests: unit, property (`proptest`), contract (fixtures), fake-client integration, fake-CDN integration. Also regenerates TS bindings. |
+| `cargo test` | 124 Rust tests: unit, property (`proptest`), contract (fixtures), fake-client integration, fake-CDN integration. Also regenerates TS bindings. |
 | `cargo test -p static-data --test seed_builds -- --ignored` | Checks seed builds against the live patch (network) |
+| `cargo test -p opgg -- --ignored` | Checks the live OP.GG API still parses (network) |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Lints, including the Tauri shell. `unwrap`, `expect` and `panic` are denied outside tests |
-| `cd ui && npm test` | 12 component tests with a fake backend |
+| `cd ui && npm test` | 21 component tests with a fake backend |
 | `cd ui && npm run lint && npm run typecheck` | ESLint (strict TS rules) and `tsc` |
 
 `cargo test` skips `apps/desktop` (see `default-members`) so it runs on any OS.
@@ -70,7 +74,26 @@ with in-memory fakes.
 socket on one port, as the real client does. It covers subscribing, event
 mapping, client restarts, starting mid champ select, and booting clients.
 
-## Adding builds
+## Where builds come from
+
+When you hover or lock in a champion the app asks OP.GG (`lol-api-champion.op.gg`, the JSON API behind
+the website) for the champion's statistics: all regions combined
+(`OPGG_REGION` in `apps/desktop/src/lib.rs`; a code like `EUNE` limits it to
+one server), Emerald+, in the assigned role. Without an
+assigned role it uses the champion's most played role; in ARAM (a champ
+select with a bench) it uses ARAM statistics. From the response it takes:
+
+- **Rune pages:** the most common page of each of the top five keystone and
+  secondary-tree pairs. The first is applied; the others can be chosen in
+  the app. Pages that are invalid this patch are left out.
+- **Summoner spells:** the most picked pair, with Flash on your key.
+- **Item set:** starting items, core build, boots and six situational items.
+
+Answers are cached for 30 minutes. This API is undocumented and can change
+without notice; the parser in `crates/opgg/src/parse.rs` tolerates missing
+fields, and if OP.GG fails the seed builds are used and the app says so.
+
+### Adding seed builds
 
 Append to `data/builds/seed.json`. IDs are checked against the current patch
 at runtime: a build with a rune, item or spell that no longer exists is
@@ -89,9 +112,9 @@ skipped (or the dead items dropped) and the reason shows in the app.
 | F-05 | Settings persisted locally | Done; atomic writes, corrupt file kept aside |
 | F-06 | Tray, start with Windows, start minimised | Done; single instance |
 | F-07 | Legal notice / About | Done |
-| F-10 | Rune page import on lock-in | Done; replaces only our page unless allowed |
-| F-11 | Item set import | Done; keeps the player's own sets |
-| F-12 | Summoner spells with Flash key preference | Done |
+| F-10 | Rune page import on lock-in | Done; OP.GG pages per role, choosable in the app |
+| F-11 | Item set import | Done; from OP.GG, keeps the player's own sets |
+| F-12 | Summoner spells with Flash key preference | Done; from OP.GG |
 | N-01 | Rotating log file, open logs folder | Done |
 
 ### Not yet verified
@@ -104,4 +127,5 @@ skipped (or the dead items dropped) and the reason shows in the app.
 - The Tauri shell compiles and passes clippy on Linux; the Windows installer
   build runs in CI and has not been run by hand.
 - Seed builds are three examples (Garen top, Lux mid, Jinx bot), valid
-  against the fixture patch but not tuned to the meta.
+  against the fixture patch but not tuned to the meta. They are only the
+  offline fallback now.

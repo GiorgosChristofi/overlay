@@ -3,7 +3,7 @@
 //! Contract tests: every champ select payload in `fixtures/` must parse, and
 //! the expected lock must be found. New recordings are picked up automatically.
 
-use domain::champ_select::{locked_pick, ChampSelectSession, LockedPick, Role};
+use domain::champ_select::{selected_pick, ChampSelectSession, ChampionPick, GameMode, Role};
 use std::path::PathBuf;
 
 fn fixture_files(prefix: &str) -> Vec<PathBuf> {
@@ -52,10 +52,11 @@ fn load(name: &str) -> ChampSelectSession {
 fn draft_fixture_yields_locked_mid_lux() {
     let s = load("champ-select-session-draft-locked.json");
     assert_eq!(
-        locked_pick(&s),
-        Some(LockedPick {
+        selected_pick(&s),
+        Some(ChampionPick {
             champion_id: 99,
-            role: Role::Middle
+            role: Role::Middle,
+            mode: GameMode::SummonersRift,
         })
     );
 }
@@ -64,10 +65,11 @@ fn draft_fixture_yields_locked_mid_lux() {
 fn aram_fixture_yields_assigned_champion() {
     let s = load("champ-select-session-aram.json");
     assert_eq!(
-        locked_pick(&s),
-        Some(LockedPick {
+        selected_pick(&s),
+        Some(ChampionPick {
             champion_id: 222,
-            role: Role::Any
+            role: Role::Any,
+            mode: GameMode::Aram,
         })
     );
 }

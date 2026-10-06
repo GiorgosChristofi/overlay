@@ -184,6 +184,22 @@ impl LcuPort for LcuHttp {
     }
 }
 
+/// Repeated ids (e.g. two potions) become one entry with a count, in order
+/// of first appearance, as the shop shows them.
+fn counted(items: &[i64]) -> Vec<Value> {
+    let mut counts: Vec<(i64, u32)> = Vec::new();
+    for id in items {
+        match counts.iter_mut().find(|(seen, _)| seen == id) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((*id, 1)),
+        }
+    }
+    counts
+        .into_iter()
+        .map(|(id, count)| json!({ "id": id.to_string(), "count": count }))
+        .collect()
+}
+
 /// Converts our item set into the client's JSON format.
 pub fn item_set_json(set: &ItemSet) -> Value {
     let blocks: Vec<Value> = set
@@ -194,7 +210,7 @@ pub fn item_set_json(set: &ItemSet) -> Value {
                 "type": title,
                 "hideIfSummonerSpell": "",
                 "showIfSummonerSpell": "",
-                "items": items.iter().map(|id| json!({ "id": id.to_string(), "count": 1 })).collect::<Vec<_>>(),
+                "items": counted(items),
             })
         })
         .collect();
@@ -265,6 +281,17 @@ mod tests {
         assert_eq!(sets[1]["title"], "LoL Overlay: Lux Middle");
         assert_eq!(sets[1]["blocks"][0]["items"][0]["id"], "1056");
         assert_eq!(merged["accountId"], 1);
+    }
+
+    #[test]
+    fn repeated_items_become_one_entry_with_a_count() {
+        let mut s = set();
+        s.blocks = vec![("Start".into(), vec![1056, 2003, 2003])];
+        let items = &item_set_json(&s)["blocks"][0]["items"];
+        assert_eq!(
+            *items,
+            json!([{ "id": "1056", "count": 1 }, { "id": "2003", "count": 2 }])
+        );
     }
 
     #[test]

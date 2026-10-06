@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ImportReportDto } from "../../bindings/ImportReportDto";
 import type { StepResultDto } from "../../bindings/StepResultDto";
 import { useBackend } from "../../lib/BackendContext";
+import { RunePicker } from "./RunePicker";
 
 const STEPS: Array<{ key: "runes" | "itemSet" | "summonerSpells"; label: string }> = [
   { key: "runes", label: "Runes" },
@@ -60,7 +61,7 @@ export function ImportPanel({ report, canReimport, onReport }: Props) {
     return (
       <section className="import import-empty" aria-labelledby="import-title">
         <h2 id="import-title">Champion select</h2>
-        <p>Lock in a champion and your runes, item set and summoner spells are set for you.</p>
+        <p>Hover or lock in a champion and your runes, item set and summoner spells are set for you.</p>
       </section>
     );
   }
@@ -77,6 +78,7 @@ export function ImportPanel({ report, canReimport, onReport }: Props) {
           </button>
         )}
       </header>
+      {report.source && <p className="import-source">Build from {report.source}</p>}
       <ul className="steps">
         {STEPS.map(({ key, label }) => (
           <li key={key} className="step">
@@ -91,6 +93,7 @@ export function ImportPanel({ report, canReimport, onReport }: Props) {
           {error}
         </p>
       )}
+      {report.runePages.length > 0 && <RunePicker report={report} onReport={onReport} />}
     </section>
   );
 }

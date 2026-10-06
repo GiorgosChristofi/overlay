@@ -121,6 +121,7 @@ impl DataDragon {
             },
         )?;
         catalog.image_base_url = format!("{}/cdn/{version}/img", self.base_url);
+        catalog.rune_image_base_url = format!("{}/cdn/img", self.base_url);
         Ok(catalog)
     }
 

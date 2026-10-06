@@ -56,7 +56,7 @@ pub enum StepResultDto {
     Failed { error: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct ImportReportDto {
@@ -65,6 +65,59 @@ pub struct ImportReportDto {
     pub runes: StepResultDto,
     pub item_set: StepResultDto,
     pub summoner_spells: StepResultDto,
+    /// Where the build came from, e.g. `OP.GG all regions · Emerald+ · patch 16.19`.
+    pub source: Option<String>,
+    /// Rune pages the player can switch between, best first.
+    pub rune_pages: Vec<RunePageDto>,
+    /// Index into `rune_pages` of the page last sent to the client.
+    pub selected_rune_page: Option<u32>,
+}
+
+/// One choosable rune page. Perk order: keystone, 3 primary, 2 secondary, 3 shards.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RunePageDto {
+    pub primary_style_id: i32,
+    pub sub_style_id: i32,
+    pub perk_ids: Vec<i32>,
+    /// Statistics, when the source has them.
+    pub games: Option<u32>,
+    /// `0.0..=1.0`.
+    pub win_rate: Option<f32>,
+    /// `0.0..=1.0`.
+    pub pick_rate: Option<f32>,
+}
+
+/// The current patch's rune trees and stat shards, for drawing pages.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RuneCatalogDto {
+    pub trees: Vec<RuneTreeDto>,
+    pub stat_shard_rows: Vec<Vec<RuneDto>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RuneTreeDto {
+    pub id: i32,
+    pub name: String,
+    pub icon_url: Option<String>,
+    /// Row 0 holds keystones; rows 1..=3 the regular runes.
+    pub slots: Vec<Vec<RuneDto>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RuneDto {
+    pub id: i32,
+    pub name: String,
+    pub icon_url: Option<String>,
+    /// What the rune does, plain text; paragraphs separated by blank lines.
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

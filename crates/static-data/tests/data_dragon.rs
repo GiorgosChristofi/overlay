@@ -54,7 +54,7 @@ async fn fake_cdn() -> (String, Arc<AtomicUsize>) {
 async fn downloads_latest_patch_and_parses_it() {
     let (url, _) = fake_cdn().await;
     let cache = tempfile::tempdir().unwrap();
-    let catalog = DataDragon::new(url, cache.path(), "en_US")
+    let catalog = DataDragon::new(url.clone(), cache.path(), "en_US")
         .unwrap()
         .load()
         .await
@@ -80,6 +80,21 @@ async fn downloads_latest_patch_and_parses_it() {
         vec![8214, 8229, 8230]
     );
     assert_eq!(catalog.stat_shard_rows.len(), 3);
+    assert_eq!(catalog.rune_image_base_url, format!("{url}/cdn/img"));
+    for shard in catalog.stat_shard_rows.iter().flatten() {
+        let info = &catalog.runes[shard];
+        assert!(!info.name.is_empty(), "shard {shard} has no name");
+        assert!(
+            !info.description.is_empty(),
+            "shard {shard} has no description"
+        );
+        assert!(
+            catalog
+                .rune_icon_url(&info.icon)
+                .is_some_and(|u| u.starts_with("https://")),
+            "shard {shard} has no icon"
+        );
+    }
 }
 
 #[tokio::test]

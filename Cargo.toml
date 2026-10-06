@@ -16,6 +16,7 @@ publish = false
 # internal
 domain = { path = "crates/domain" }
 lcu-client = { path = "crates/lcu-client" }
+opgg = { path = "crates/opgg" }
 static-data = { path = "crates/static-data" }
 app-core = { path = "crates/app-core" }
 ipc-types = { path = "crates/ipc-types" }

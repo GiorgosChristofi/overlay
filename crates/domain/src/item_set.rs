@@ -57,7 +57,6 @@ mod tests {
     use super::*;
     use crate::builds::ItemBlock;
     use crate::champ_select::Role;
-    use crate::runes::RuneSelection;
 
     #[test]
     fn drops_items_removed_this_patch() {
@@ -67,12 +66,8 @@ mod tests {
         let build = Build {
             champion_id: 222,
             role: Role::Bottom,
-            runes: RuneSelection {
-                primary_style_id: 0,
-                sub_style_id: 0,
-                perk_ids: vec![],
-            },
-            summoner_spells: [4, 7],
+            rune_pages: vec![],
+            summoner_spells: Some([4, 7]),
             item_blocks: vec![
                 ItemBlock {
                     title: "Start".into(),
@@ -83,6 +78,7 @@ mod tests {
                     items: vec![888_888],
                 },
             ],
+            source: String::new(),
         };
         let (set, dropped) = item_set_for(&build, &catalog);
         assert_eq!(set.blocks, vec![("Start".to_string(), vec![1055])]);

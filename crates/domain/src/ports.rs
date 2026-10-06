@@ -1,7 +1,8 @@
 //! Port traits implemented by adapter crates. `app-core` depends only on
 //! these, so every service can be tested with in-memory fakes.
 
-use crate::champ_select::ChampSelectSession;
+use crate::builds::Build;
+use crate::champ_select::{ChampSelectSession, ChampionPick};
 use crate::error::PortError;
 use crate::item_set::ItemSet;
 use crate::phase::GameflowPhase;
@@ -33,4 +34,15 @@ pub enum LcuEvent {
     Phase(GameflowPhase),
     /// `None` when the session ends.
     ChampSelect(Option<ChampSelectSession>),
+}
+
+/// Where recommended builds come from (live statistics, the seed file, ...).
+#[async_trait]
+pub trait BuildSource: Send + Sync + fmt::Debug {
+    /// Short name for logs and error messages, e.g. `OP.GG`.
+    fn name(&self) -> &str;
+
+    /// The build for a pick. `Ok(None)` means the source has no data for
+    /// this champion and mode; `Err` means it could not be asked.
+    async fn build(&self, pick: ChampionPick) -> Result<Option<Build>, PortError>;
 }

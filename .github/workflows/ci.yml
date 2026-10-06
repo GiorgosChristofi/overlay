@@ -29,6 +29,9 @@ jobs:
       - name: Seed builds valid on the live patch
         if: github.event_name == 'schedule'
         run: cargo test -p static-data --test seed_builds -- --ignored
+      - name: OP.GG API still parses
+        if: github.event_name == 'schedule'
+        run: cargo test -p opgg -- --ignored
 
   deny:
     name: Dependency licences and advisories

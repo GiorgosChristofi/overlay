@@ -3,7 +3,7 @@
 
 use crate::AppState;
 use app_core::CoreError;
-use ipc_types::{AppErrorDto, ImportReportDto, SettingsDto, StatusDto};
+use ipc_types::{AppErrorDto, ImportReportDto, RuneCatalogDto, SettingsDto, StatusDto};
 use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt;
 
@@ -61,6 +61,24 @@ pub fn save_settings(
 #[tauri::command]
 pub async fn reimport(state: State<'_, AppState>) -> Result<ImportReportDto, AppErrorDto> {
     state.core.reimport().await.map_err(|e| to_dto(&e))
+}
+
+#[tauri::command]
+pub async fn apply_rune_page(
+    state: State<'_, AppState>,
+    index: u32,
+) -> Result<ImportReportDto, AppErrorDto> {
+    let index = usize::try_from(index).unwrap_or(usize::MAX);
+    state
+        .core
+        .apply_rune_page(index)
+        .await
+        .map_err(|e| to_dto(&e))
+}
+
+#[tauri::command]
+pub fn get_rune_catalog(state: State<'_, AppState>) -> Option<RuneCatalogDto> {
+    state.core.rune_catalog()
 }
 
 #[tauri::command]

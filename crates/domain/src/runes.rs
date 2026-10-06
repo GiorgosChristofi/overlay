@@ -185,6 +185,7 @@ mod tests {
                 RuneTree {
                     id: 8000,
                     name: "Precision".into(),
+                    icon: String::new(),
                     slots: vec![
                         vec![8005, 8008, 8021, 8010],
                         vec![9101, 9111, 8009],
@@ -195,6 +196,7 @@ mod tests {
                 RuneTree {
                     id: 8200,
                     name: "Sorcery".into(),
+                    icon: String::new(),
                     slots: vec![
                         vec![8214, 8229, 8230],
                         vec![8224, 8226, 8275],

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppErrorDto } from "../bindings/AppErrorDto";
 import type { ImportReportDto } from "../bindings/ImportReportDto";
+import type { RuneCatalogDto } from "../bindings/RuneCatalogDto";
 import type { SettingsDto } from "../bindings/SettingsDto";
 import type { StatusDto } from "../bindings/StatusDto";
 
@@ -19,6 +20,10 @@ export interface Backend {
   getSettings(): Promise<SettingsDto>;
   saveSettings(settings: SettingsDto): Promise<SettingsDto>;
   reimport(): Promise<ImportReportDto>;
+  /** Sends rune page `index` of the last import's `runePages` to the client. */
+  applyRunePage(index: number): Promise<ImportReportDto>;
+  /** The current patch's rune trees; `null` while game data loads. */
+  getRuneCatalog(): Promise<RuneCatalogDto | null>;
   openLogsFolder(): Promise<void>;
   appVersion(): Promise<string>;
   onStatus(handler: (status: StatusDto) => void): Promise<Unlisten>;
@@ -47,6 +52,8 @@ export const tauriBackend: Backend = {
   getSettings: () => call("get_settings"),
   saveSettings: (settings) => call("save_settings", { settings }),
   reimport: () => call("reimport"),
+  applyRunePage: (index) => call("apply_rune_page", { index }),
+  getRuneCatalog: () => call("get_rune_catalog"),
   openLogsFolder: () => call("open_logs_folder"),
   appVersion: () => call("app_version"),
   onStatus: (handler) => listen<StatusDto>(EVENT_STATUS, (e) => handler(e.payload)),

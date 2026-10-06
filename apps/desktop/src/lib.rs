@@ -6,9 +6,11 @@ mod paths;
 mod sink;
 mod tray;
 
-use app_core::{Core, SettingsStore};
+use app_core::{Core, SeedBuilds, SettingsStore};
 use domain::builds::BuildCatalog;
+use domain::ports::BuildSource;
 use lcu_client::{run_connector, ConnectorConfig};
+use opgg::{OpggClient, OPGG_API_URL};
 use static_data::{DataDragon, DATA_DRAGON_URL};
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,8 +18,11 @@ use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 use tokio_util::sync::CancellationToken;
 
-/// Shipped with the binary; replaced by the data pipeline in v2.
+/// Shipped with the binary; used when OP.GG cannot be reached.
 const SEED_BUILDS: &str = include_str!("../../../data/builds/seed.json");
+/// OP.GG region whose statistics the builds come from. `global` combines
+/// every server, about ten times the games of a single region.
+const OPGG_REGION: &str = opgg::GLOBAL_REGION;
 const MINIMIZED_FLAG: &str = "--minimized";
 const DATA_DRAGON_RETRY: Duration = Duration::from_secs(60);
 
@@ -50,10 +55,16 @@ pub fn run() {
             let log_guard = paths::init_logging(&dirs.logs)?;
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting");
 
-            let builds = BuildCatalog::from_json(SEED_BUILDS)?;
+            let seed = BuildCatalog::from_json(SEED_BUILDS)?;
+            let mut sources: Vec<Arc<dyn BuildSource>> = Vec::new();
+            match OpggClient::new(OPGG_API_URL, OPGG_REGION) {
+                Ok(opgg) => sources.push(Arc::new(opgg)),
+                Err(e) => tracing::error!(error = %e, "cannot create OP.GG client"),
+            }
+            sources.push(Arc::new(SeedBuilds(seed)));
             let store = SettingsStore::new(dirs.data.join("settings.json"));
             let core = Core::new(
-                builds,
+                sources,
                 store,
                 Arc::new(sink::TauriSink::new(app.handle().clone())),
             );
@@ -96,6 +107,8 @@ pub fn run() {
             commands::get_settings,
             commands::save_settings,
             commands::reimport,
+            commands::apply_rune_page,
+            commands::get_rune_catalog,
             commands::open_logs_folder,
             commands::app_version,
         ])

@@ -19,6 +19,7 @@ app-core.workspace = true
 domain.workspace = true
 ipc-types.workspace = true
 lcu-client.workspace = true
+opgg.workspace = true
 static-data.workspace = true
 serde.workspace = true
 serde_json.workspace = true

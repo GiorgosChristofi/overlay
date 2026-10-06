@@ -2,14 +2,14 @@
 
 //! Drives `Core` through a whole champ select against an in-memory fake client.
 
-use app_core::{Core, CoreError, EventSink, SettingsStore};
+use app_core::{Core, CoreError, EventSink, SeedBuilds, SettingsStore};
 use async_trait::async_trait;
-use domain::builds::BuildCatalog;
-use domain::champ_select::{Action, ChampSelectSession, TeamMember};
+use domain::builds::{Build, BuildCatalog, ItemBlock, PickStats, RunePageOption};
+use domain::champ_select::{Action, ChampSelectSession, ChampionPick, Role, TeamMember};
 use domain::item_set::ItemSet;
 use domain::phase::GameflowPhase;
-use domain::ports::{LcuEvent, LcuPort};
-use domain::runes::{ExistingPage, NewRunePage};
+use domain::ports::{BuildSource, LcuEvent, LcuPort};
+use domain::runes::{ExistingPage, NewRunePage, RuneSelection};
 use domain::settings::Settings;
 use domain::static_catalog::{RuneTree, StaticCatalog};
 use domain::summoner::Summoner;
@@ -88,6 +88,33 @@ impl LcuPort for FakeLcu {
     }
 }
 
+/// Stands in for OP.GG: a fixed answer for every pick.
+#[derive(Debug)]
+struct FakeSource {
+    answer: Result<Option<Build>, PortError>,
+    asked: Mutex<Vec<ChampionPick>>,
+}
+
+impl FakeSource {
+    fn new(answer: Result<Option<Build>, PortError>) -> Arc<Self> {
+        Arc::new(Self {
+            answer,
+            asked: Mutex::new(Vec::new()),
+        })
+    }
+}
+
+#[async_trait]
+impl BuildSource for FakeSource {
+    fn name(&self) -> &str {
+        "OP.GG"
+    }
+    async fn build(&self, pick: ChampionPick) -> Result<Option<Build>, PortError> {
+        self.asked.lock().unwrap().push(pick);
+        self.answer.clone()
+    }
+}
+
 #[derive(Debug, Default)]
 struct RecordingSink {
     statuses: Mutex<Vec<StatusDto>>,
@@ -113,6 +140,7 @@ fn catalog() -> Arc<StaticCatalog> {
             RuneTree {
                 id: 8000,
                 name: "Precision".into(),
+                icon: String::new(),
                 slots: vec![
                     vec![8005, 8008, 8021, 8010],
                     vec![9101, 9111, 8009],
@@ -123,6 +151,7 @@ fn catalog() -> Arc<StaticCatalog> {
             RuneTree {
                 id: 8200,
                 name: "Sorcery".into(),
+                icon: String::new(),
                 slots: vec![
                     vec![8214, 8229, 8230],
                     vec![8224, 8226, 8275],
@@ -168,11 +197,18 @@ struct Harness {
 }
 
 fn harness(lcu: FakeLcu, settings: Settings) -> Harness {
+    harness_with(lcu, settings, Vec::new())
+}
+
+/// `live` sources are asked before the seed builds, like OP.GG in the app.
+fn harness_with(lcu: FakeLcu, settings: Settings, live: Vec<Arc<dyn BuildSource>>) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let store = SettingsStore::new(dir.path().join("settings.json"));
     store.save(&settings).unwrap();
     let sink = Arc::new(RecordingSink::default());
-    let core = Core::new(builds(), store, sink.clone());
+    let mut sources = live;
+    sources.push(Arc::new(SeedBuilds(builds())));
+    let core = Core::new(sources, store, sink.clone());
     core.set_catalog(catalog());
     Harness {
         core,
@@ -212,7 +248,56 @@ fn session(champion_id: i64, position: &str, completed: bool) -> ChampSelectSess
             kind: "pick".into(),
             is_in_progress: !completed,
         }]],
+        ..Default::default()
     }
+}
+
+/// Two valid Lux pages from the fixture trees: Sorcery/Precision and Precision/Sorcery.
+fn live_lux_build() -> Build {
+    let page = |primary: i64, sub: i64, perks: [i64; 9], games: u32| RunePageOption {
+        runes: RuneSelection {
+            primary_style_id: primary,
+            sub_style_id: sub,
+            perk_ids: perks.to_vec(),
+        },
+        stats: Some(PickStats {
+            games,
+            wins: games / 2,
+            pick_rate: 0.5,
+        }),
+    };
+    Build {
+        champion_id: 99,
+        role: Role::Middle,
+        rune_pages: vec![
+            page(
+                8200,
+                8000,
+                [8229, 8226, 8210, 8237, 8009, 8014, 5008, 5008, 5011],
+                900,
+            ),
+            page(
+                8000,
+                8200,
+                [8008, 9101, 9104, 8017, 8233, 8236, 5005, 5008, 5011],
+                100,
+            ),
+        ],
+        summoner_spells: Some([14, 4]),
+        item_blocks: vec![ItemBlock {
+            title: "Starting items".into(),
+            items: vec![1056, 2003, 2003],
+        }],
+        source: "OP.GG EUNE · Emerald+ · patch 16.19".into(),
+    }
+}
+
+fn last_page_created(lcu: &FakeLcu) -> String {
+    lcu.calls()
+        .into_iter()
+        .rev()
+        .find(|c| c.starts_with("create_page"))
+        .unwrap()
 }
 
 fn is_done(r: &StepResultDto) -> bool {
@@ -222,7 +307,7 @@ fn is_done(r: &StepResultDto) -> bool {
 // ---------- tests ----------
 
 #[tokio::test]
-async fn imports_once_when_the_player_locks_in() {
+async fn imports_on_hover_and_not_again_when_locking_the_same_champion() {
     let h = harness(
         FakeLcu {
             owned_pages: 2,
@@ -235,10 +320,10 @@ async fn imports_once_when_the_player_locks_in() {
     h.core
         .handle(LcuEvent::ChampSelect(Some(session(99, "middle", false))))
         .await;
-    assert!(h.imports().is_empty(), "hovering must not import");
+    assert_eq!(h.imports().len(), 1, "hovering imports");
 
     h.core
-        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", false))))
         .await;
     h.core
         .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
@@ -248,7 +333,7 @@ async fn imports_once_when_the_player_locks_in() {
     assert_eq!(
         imports.len(),
         1,
-        "repeated session updates must not re-import"
+        "repeated updates and locking the hovered champion must not re-import"
     );
     let r = &imports[0];
     assert_eq!(
@@ -268,6 +353,29 @@ async fn imports_once_when_the_player_locks_in() {
             "spells [4, 14]".to_string(),
         ]
     );
+}
+
+#[tokio::test]
+async fn hovering_another_champion_imports_for_it() {
+    let h = harness(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+    );
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", false))))
+        .await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(222, "middle", false))))
+        .await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(222, "middle", true))))
+        .await;
+    let names: Vec<String> = h.imports().into_iter().map(|r| r.champion_name).collect();
+    assert_eq!(names, ["Lux", "Jinx"]);
 }
 
 #[tokio::test]
@@ -494,7 +602,7 @@ async fn status_reflects_connection_profile_and_disconnect() {
 }
 
 #[tokio::test]
-async fn reimport_needs_a_locked_pick() {
+async fn reimport_needs_a_selected_pick() {
     let h = harness(
         FakeLcu {
             owned_pages: 2,
@@ -537,4 +645,175 @@ async fn saved_settings_apply_to_the_next_import() {
         h.imports()[0].summoner_spells,
         StepResultDto::Skipped { .. }
     ));
+}
+
+// ---------- live builds and rune page choice ----------
+
+#[tokio::test]
+async fn live_build_is_used_and_offers_every_rune_page() {
+    let live = FakeSource::new(Ok(Some(live_lux_build())));
+    let h = harness_with(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+        vec![live.clone()],
+    );
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
+        .await;
+
+    assert_eq!(
+        *live.asked.lock().unwrap(),
+        [ChampionPick {
+            champion_id: 99,
+            role: Role::Middle,
+            mode: domain::champ_select::GameMode::SummonersRift,
+        }]
+    );
+    let r = &h.imports()[0];
+    assert_eq!(
+        r.source.as_deref(),
+        Some("OP.GG EUNE · Emerald+ · patch 16.19")
+    );
+    assert_eq!(r.rune_pages.len(), 2);
+    assert_eq!(r.selected_rune_page, Some(0));
+    assert_eq!(r.rune_pages[0].games, Some(900));
+    assert_eq!(r.rune_pages[0].win_rate, Some(0.5));
+    assert!(last_page_created(&h.lcu)
+        .ends_with("[8229, 8226, 8210, 8237, 8009, 8014, 5008, 5008, 5011]"));
+    // Live spells, with Flash moved to D.
+    assert!(h.lcu.calls().contains(&"spells [4, 14]".to_string()));
+}
+
+#[tokio::test]
+async fn choosing_another_rune_page_sends_it_and_import_again_keeps_it() {
+    let h = harness_with(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+        vec![FakeSource::new(Ok(Some(live_lux_build())))],
+    );
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
+        .await;
+
+    let r = h.core.apply_rune_page(1).await.unwrap();
+    assert_eq!(r.selected_rune_page, Some(1));
+    assert!(is_done(&r.runes), "{r:?}");
+    assert!(last_page_created(&h.lcu)
+        .ends_with("[8008, 9101, 9104, 8017, 8233, 8236, 5005, 5008, 5011]"));
+    assert_eq!(h.imports().last(), Some(&r), "the UI is told too");
+    assert_eq!(h.core.last_import(), Some(r));
+
+    let again = h.core.reimport().await.unwrap();
+    assert_eq!(again.selected_rune_page, Some(1));
+    assert!(last_page_created(&h.lcu).starts_with("create_page LoL Overlay: Lux [8008"));
+
+    assert!(matches!(
+        h.core.apply_rune_page(7).await,
+        Err(CoreError::NoSuchRunePage)
+    ));
+}
+
+#[tokio::test]
+async fn choosing_a_rune_page_needs_an_imported_build() {
+    let h = harness(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+    );
+    h.connect_and_enter_champ_select().await;
+    assert!(matches!(
+        h.core.apply_rune_page(0).await,
+        Err(CoreError::NothingToImport)
+    ));
+}
+
+#[tokio::test]
+async fn rune_pages_invalid_this_patch_are_not_offered() {
+    let mut build = live_lux_build();
+    build.rune_pages[1].runes.perk_ids[0] = 123_456;
+    let h = harness_with(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+        vec![FakeSource::new(Ok(Some(build)))],
+    );
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
+        .await;
+    assert_eq!(h.imports()[0].rune_pages.len(), 1);
+}
+
+#[tokio::test]
+async fn unreachable_live_source_falls_back_to_seed_builds() {
+    let h = harness_with(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+        vec![FakeSource::new(Err(PortError::Transport(
+            "timed out".into(),
+        )))],
+    );
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
+        .await;
+    let r = &h.imports()[0];
+    assert!(is_done(&r.runes), "{r:?}");
+    assert_eq!(
+        r.source.as_deref(),
+        Some("Built-in build (live statistics unavailable)")
+    );
+}
+
+#[tokio::test]
+async fn unreachable_live_source_without_a_seed_build_is_a_failure_with_the_reason() {
+    let h = harness_with(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+        vec![FakeSource::new(Err(PortError::Transport(
+            "timed out".into(),
+        )))],
+    );
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(1, "middle", true))))
+        .await;
+    match &h.imports()[0].runes {
+        StepResultDto::Failed { error } => {
+            assert!(
+                error.contains("OP.GG") && error.contains("timed out"),
+                "{error}"
+            )
+        }
+        other => panic!("expected failure, got {other:?}"),
+    }
+    assert!(h.lcu.calls().is_empty());
+}
+
+#[tokio::test]
+async fn rune_catalog_describes_the_patch_trees() {
+    let h = harness(FakeLcu::default(), Settings::default());
+    let c = h.core.rune_catalog().unwrap();
+    assert_eq!(c.trees.len(), 2);
+    assert_eq!(c.trees[1].name, "Sorcery");
+    assert_eq!(c.trees[1].slots[0].len(), 3);
+    assert_eq!(c.stat_shard_rows.len(), 3);
 }

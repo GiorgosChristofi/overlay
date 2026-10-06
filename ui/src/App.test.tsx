@@ -29,7 +29,7 @@ describe("App", () => {
   it("shows an import as soon as it is emitted", async () => {
     const fake = fakeBackend({ status: connected });
     renderWith(fake.backend, <App />);
-    await screen.findByText(/Lock in a champion/);
+    await screen.findByText(/Hover or lock in a champion/);
 
     act(() => fake.emitImport(luxReport));
 

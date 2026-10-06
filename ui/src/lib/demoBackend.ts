@@ -1,31 +1,36 @@
 // Sample data for working on the UI in a normal browser (`npm run dev`),
 // without Tauri or League running. `?state=disconnected|lobby|champSelect|empty`
-// picks the scene.
+// picks the scene; `&page=N` the active rune page.
 import type { Backend } from "./backend";
+import { demoRuneCatalog, demoRunePages } from "./demoRunes";
 import type { ImportReportDto } from "../bindings/ImportReportDto";
 import type { SessionStateDto } from "../bindings/SessionStateDto";
 import type { SettingsDto } from "../bindings/SettingsDto";
 import type { StatusDto } from "../bindings/StatusDto";
 
-const scene = new URLSearchParams(window.location.search).get("state") ?? "champSelect";
+const params = new URLSearchParams(window.location.search);
+const scene = params.get("state") ?? "champSelect";
 
 const status: StatusDto =
   scene === "disconnected"
     ? { session: "disconnected", summoner: null, patch: null }
     : {
         session: (scene === "empty" ? "champSelect" : scene) as SessionStateDto,
-        summoner: { riotId: "Demo Player#EUW", level: 287, profileIconUrl: null },
+        summoner: { riotId: "Demo Player#EUNE", level: 287, profileIconUrl: null },
         patch: "16.19.1",
       };
 
-const report: ImportReportDto | null =
+let report: ImportReportDto | null =
   scene === "champSelect"
     ? {
         championName: "Lux",
         role: "Middle",
-        runes: { status: "done", detail: "Rune page \u201cLoL Overlay: Lux\u201d is active" },
-        itemSet: { status: "done", detail: "5 items added; 2 removed this patch were left out" },
+        runes: { status: "done", detail: "Rune page “LoL Overlay: Lux” is active" },
+        itemSet: { status: "done", detail: "13 items added to the shop's recommended tab" },
         summonerSpells: { status: "skipped", reason: "Turned off in settings" },
+        source: "OP.GG all regions · Emerald+ · patch 16.19",
+        runePages: demoRunePages,
+        selectedRunePage: Number(params.get("page") ?? 0) % demoRunePages.length,
       }
     : null;
 
@@ -40,6 +45,7 @@ let settings: SettingsDto = {
 };
 
 const noop = async () => () => {};
+const nothingToImport = { code: "nothing_to_import", message: "Pick a champion first" };
 
 export const demoBackend: Backend = {
   getStatus: async () => status,
@@ -47,9 +53,16 @@ export const demoBackend: Backend = {
   getSettings: async () => settings,
   saveSettings: async (next) => (settings = next),
   reimport: async () => {
-    if (!report) throw { code: "nothing_to_import", message: "Lock in a champion first" };
+    if (!report) throw nothingToImport;
     return report;
   },
+  applyRunePage: async (index) => {
+    if (!report) throw nothingToImport;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    report = { ...report, selectedRunePage: index };
+    return report;
+  },
+  getRuneCatalog: async () => demoRuneCatalog,
   openLogsFolder: async () => undefined,
   appVersion: async () => "0.1.0-demo",
   onStatus: noop,

@@ -27,8 +27,10 @@ fn check(catalog: &domain::static_catalog::StaticCatalog) {
             "unknown champion {}",
             b.champion_id
         );
-        validate(&b.runes, catalog).unwrap_or_else(|e| panic!("{name}: {e}"));
-        for spell in b.summoner_spells {
+        for page in &b.rune_pages {
+            validate(&page.runes, catalog).unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+        for spell in b.summoner_spells.into_iter().flatten() {
             assert!(
                 catalog.summoner_spells.contains_key(&spell),
                 "{name}: unknown spell {spell}"

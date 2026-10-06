@@ -5,10 +5,10 @@ import { fakeBackend, luxReport } from "../../test/fakeBackend";
 import { renderWith } from "../../test/render";
 
 describe("ImportPanel", () => {
-  it("invites the player to lock in when nothing was imported", () => {
+  it("invites the player to pick a champion when nothing was imported", () => {
     const { backend } = fakeBackend();
     renderWith(backend, <ImportPanel report={null} canReimport={false} onReport={() => {}} />);
-    expect(screen.getByText(/Lock in a champion/)).toBeInTheDocument();
+    expect(screen.getByText(/Hover or lock in a champion/)).toBeInTheDocument();
   });
 
   it("shows every step with its own outcome", () => {

@@ -1,15 +1,15 @@
 //! The champ-select import: rune page, item set and summoner spells.
 //! Each step runs independently, so one failure never blocks the others.
 
-use domain::builds::Build;
-use domain::champ_select::LockedPick;
+use domain::builds::{Build, RunePageOption};
+use domain::champ_select::{ChampionPick, GameMode};
 use domain::item_set::item_set_for;
 use domain::ports::LcuPort;
 use domain::runes::{self, NewRunePage, SlotPlan};
 use domain::settings::Settings;
 use domain::spells::{arrange, FlashKey};
 use domain::static_catalog::StaticCatalog;
-use ipc_types::{ImportReportDto, StepResultDto};
+use ipc_types::{ImportReportDto, RunePageDto, StepResultDto};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepOutcome {
@@ -18,13 +18,26 @@ pub enum StepOutcome {
     Failed(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What looking up a build for a pick found.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BuildLookup {
+    Found(Build),
+    /// No source has a build for this champion.
+    Missing,
+    /// No source had a build, and at least one could not be asked.
+    Unavailable(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ImportReport {
     pub champion_name: String,
     pub role: String,
     pub runes: StepOutcome,
     pub item_set: StepOutcome,
     pub summoner_spells: StepOutcome,
+    pub source: Option<String>,
+    pub rune_pages: Vec<RunePageOption>,
+    pub selected_rune_page: Option<usize>,
 }
 
 impl From<StepOutcome> for StepResultDto {
@@ -37,6 +50,24 @@ impl From<StepOutcome> for StepResultDto {
     }
 }
 
+/// Ids fit in `i32`; anything else is not a real rune and maps to 0.
+fn small(id: i64) -> i32 {
+    i32::try_from(id).unwrap_or(0)
+}
+
+#[allow(clippy::cast_possible_truncation)] // rates are 0..=1; f32 is plenty for display
+pub(crate) fn rune_page_dto(page: &RunePageOption) -> RunePageDto {
+    let stats = page.stats.as_ref();
+    RunePageDto {
+        primary_style_id: small(page.runes.primary_style_id),
+        sub_style_id: small(page.runes.sub_style_id),
+        perk_ids: page.runes.perk_ids.iter().copied().map(small).collect(),
+        games: stats.map(|s| s.games),
+        win_rate: stats.and_then(|s| s.win_rate()).map(|r| r as f32),
+        pick_rate: stats.map(|s| s.pick_rate as f32),
+    }
+}
+
 impl From<ImportReport> for ImportReportDto {
     fn from(r: ImportReport) -> Self {
         Self {
@@ -45,45 +76,62 @@ impl From<ImportReport> for ImportReportDto {
             runes: r.runes.into(),
             item_set: r.item_set.into(),
             summoner_spells: r.summoner_spells.into(),
+            source: r.source,
+            rune_pages: r.rune_pages.iter().map(rune_page_dto).collect(),
+            selected_rune_page: r.selected_rune_page.and_then(|i| u32::try_from(i).ok()),
         }
     }
 }
 
 const TURNED_OFF: &str = "Turned off in settings";
 
-/// Runs every enabled step for a locked pick.
+/// Runs every enabled step for a locked pick, using rune page `rune_page`
+/// of the build.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_import(
     port: &dyn LcuPort,
-    pick: LockedPick,
-    build: Option<&Build>,
+    pick: ChampionPick,
+    lookup: &BuildLookup,
+    rune_page: usize,
     catalog: &StaticCatalog,
     settings: &Settings,
     summoner_id: i64,
 ) -> ImportReport {
     let champion_name = catalog.champion_name(pick.champion_id);
-    let role = pick.role.label().to_owned();
-    let Some(build) = build else {
-        let none = StepOutcome::Skipped(format!("No build for {champion_name} yet"));
-        return ImportReport {
-            champion_name,
-            role,
-            runes: none.clone(),
-            item_set: none.clone(),
-            summoner_spells: none,
-        };
+    let build = match lookup {
+        BuildLookup::Found(build) => build,
+        BuildLookup::Missing | BuildLookup::Unavailable(_) => {
+            let outcome = match lookup {
+                BuildLookup::Unavailable(reason) => StepOutcome::Failed(reason.clone()),
+                _ => StepOutcome::Skipped(format!("No build for {champion_name} yet")),
+            };
+            return ImportReport {
+                champion_name,
+                role: pick.role_label().to_owned(),
+                runes: outcome.clone(),
+                item_set: outcome.clone(),
+                summoner_spells: outcome,
+                source: None,
+                rune_pages: Vec::new(),
+                selected_rune_page: None,
+            };
+        }
     };
 
-    let runes = if settings.import_runes {
-        import_runes(
-            port,
-            build,
-            catalog,
-            &champion_name,
-            settings.replace_current_page_when_full,
-        )
-        .await
-    } else {
-        StepOutcome::Skipped(TURNED_OFF.into())
+    let page = build.rune_pages.get(rune_page);
+    let runes = match (settings.import_runes, page) {
+        (false, _) => StepOutcome::Skipped(TURNED_OFF.into()),
+        (true, None) => StepOutcome::Skipped("This build has no rune page".into()),
+        (true, Some(page)) => {
+            import_runes(
+                port,
+                page,
+                catalog,
+                &champion_name,
+                settings.replace_current_page_when_full,
+            )
+            .await
+        }
     };
     let item_set = if settings.import_item_sets {
         import_item_set(port, build, catalog, summoner_id).await
@@ -97,21 +145,47 @@ pub async fn run_import(
     };
     ImportReport {
         champion_name,
-        role,
+        // A source may resolve "no assigned role" to the champion's main role.
+        role: match pick.mode {
+            GameMode::Aram => pick.role_label().to_owned(),
+            GameMode::SummonersRift => build.role.label().to_owned(),
+        },
         runes,
         item_set,
         summoner_spells,
+        source: Some(build.source.clone()),
+        rune_pages: build.rune_pages.clone(),
+        selected_rune_page: page.map(|_| rune_page),
     }
+}
+
+/// Sends one of the build's rune pages, chosen by the player. Runs even
+/// when automatic rune import is turned off, because the player asked.
+pub async fn apply_rune_page(
+    port: &dyn LcuPort,
+    page: &RunePageOption,
+    catalog: &StaticCatalog,
+    champion_name: &str,
+    settings: &Settings,
+) -> StepOutcome {
+    import_runes(
+        port,
+        page,
+        catalog,
+        champion_name,
+        settings.replace_current_page_when_full,
+    )
+    .await
 }
 
 async fn import_runes(
     port: &dyn LcuPort,
-    build: &Build,
+    option: &RunePageOption,
     catalog: &StaticCatalog,
     champion: &str,
     replace_current: bool,
 ) -> StepOutcome {
-    if let Err(e) = runes::validate(&build.runes, catalog) {
+    if let Err(e) = runes::validate(&option.runes, catalog) {
         return StepOutcome::Skipped(format!(
             "Build is out of date for patch {}: {e}",
             catalog.version
@@ -139,7 +213,7 @@ async fn import_runes(
         }
         SlotPlan::Create => {}
     }
-    let page = NewRunePage::from_selection(champion, &build.runes);
+    let page = NewRunePage::from_selection(champion, &option.runes);
     match port.create_rune_page(&page).await {
         Ok(()) => StepOutcome::Done(format!("Rune page \u{201c}{}\u{201d} is active", page.name)),
         Err(e) => {
@@ -204,8 +278,11 @@ async fn import_spells(
     catalog: &StaticCatalog,
     flash_key: FlashKey,
 ) -> StepOutcome {
+    let Some(spells) = build.summoner_spells else {
+        return StepOutcome::Skipped("This build has no summoner spell data".into());
+    };
     let name = |id: i64| catalog.summoner_spells.get(&id).cloned();
-    let [first, second] = arrange(build.summoner_spells, flash_key);
+    let [first, second] = arrange(spells, flash_key);
     let (Some(d), Some(f)) = (name(first), name(second)) else {
         return StepOutcome::Skipped(format!(
             "Build uses a summoner spell missing from patch {}",

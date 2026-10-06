@@ -1,21 +1,53 @@
-//! Recommended builds. In Phase 1 they come from a curated, versioned seed
-//! file; in v2 from the aggregation pipeline. Both produce a [`BuildCatalog`].
+//! Recommended builds. They come from a [`BuildSource`](crate::ports::BuildSource):
+//! live statistics (OP.GG) first, then the curated seed file shipped with
+//! the app as an offline fallback.
 
 use crate::champ_select::Role;
-use crate::runes::RuneSelection;
+use crate::runes::{self, RuneError, RuneSelection};
+use crate::static_catalog::StaticCatalog;
 use serde::Deserialize;
 use thiserror::Error;
 
 pub const SUPPORTED_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// Where the shipped seed builds say they come from.
+pub const SEED_SOURCE: &str = "Built-in build";
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(from = "SeedBuild")]
 pub struct Build {
     pub champion_id: i64,
+    /// The role these statistics are for. A source may resolve
+    /// [`Role::Any`] to the champion's most played role.
     pub role: Role,
-    pub runes: RuneSelection,
-    pub summoner_spells: [i64; 2],
+    /// Rune pages, best first. The first one is applied automatically.
+    pub rune_pages: Vec<RunePageOption>,
+    /// `None` when the source has no spell data.
+    pub summoner_spells: Option<[i64; 2]>,
     pub item_blocks: Vec<ItemBlock>,
+    /// Shown to the player, e.g. `OP.GG EUNE · Emerald+ · patch 16.19`.
+    pub source: String,
+}
+
+/// One rune page the player can choose, with how it performs when known.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunePageOption {
+    pub runes: RuneSelection,
+    pub stats: Option<PickStats>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PickStats {
+    pub games: u32,
+    pub wins: u32,
+    /// Share of all games on this champion and role, `0.0..=1.0`.
+    pub pick_rate: f64,
+}
+
+impl PickStats {
+    pub fn win_rate(&self) -> Option<f64> {
+        (self.games > 0).then(|| f64::from(self.wins) / f64::from(self.games))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -25,7 +57,51 @@ pub struct ItemBlock {
     pub items: Vec<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+/// The seed file's shape: one rune page per build.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SeedBuild {
+    champion_id: i64,
+    role: Role,
+    runes: RuneSelection,
+    summoner_spells: [i64; 2],
+    item_blocks: Vec<ItemBlock>,
+}
+
+impl From<SeedBuild> for Build {
+    fn from(b: SeedBuild) -> Self {
+        Self {
+            champion_id: b.champion_id,
+            role: b.role,
+            rune_pages: vec![RunePageOption {
+                runes: b.runes,
+                stats: None,
+            }],
+            summoner_spells: Some(b.summoner_spells),
+            item_blocks: b.item_blocks,
+            source: SEED_SOURCE.into(),
+        }
+    }
+}
+
+impl Build {
+    /// Drops rune pages that are invalid this patch, keeping the order.
+    /// Returns the first error so it can be shown when nothing is left.
+    pub fn retain_valid_rune_pages(&mut self, catalog: &StaticCatalog) -> Option<RuneError> {
+        let mut first_error = None;
+        self.rune_pages
+            .retain(|page| match runes::validate(&page.runes, catalog) {
+                Ok(()) => true,
+                Err(e) => {
+                    first_error.get_or_insert(e);
+                    false
+                }
+            });
+        first_error
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildCatalog {
     pub schema_version: u32,
@@ -70,6 +146,7 @@ impl BuildCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::static_catalog::RuneTree;
 
     const RAW: &str = r#"{
       "schemaVersion": 1,
@@ -82,7 +159,10 @@ mod tests {
     #[test]
     fn selects_exact_role() {
         let c = BuildCatalog::from_json(RAW).unwrap();
-        assert_eq!(c.select(99, Role::Support).unwrap().summoner_spells, [4, 3]);
+        assert_eq!(
+            c.select(99, Role::Support).unwrap().summoner_spells,
+            Some([4, 3])
+        );
     }
 
     #[test]
@@ -93,8 +173,73 @@ mod tests {
     }
 
     #[test]
+    fn seed_builds_have_one_rune_page_and_say_where_they_come_from() {
+        let c = BuildCatalog::from_json(RAW).unwrap();
+        let b = c.select(99, Role::Middle).unwrap();
+        assert_eq!(b.rune_pages.len(), 1);
+        assert_eq!(b.rune_pages[0].stats, None);
+        assert_eq!(b.source, SEED_SOURCE);
+    }
+
+    #[test]
     fn rejects_unknown_schema() {
         let err = BuildCatalog::from_json(r#"{"schemaVersion": 7, "builds": []}"#).unwrap_err();
         assert!(matches!(err, BuildCatalogError::Schema { found: 7, .. }));
+    }
+
+    #[test]
+    fn win_rate_needs_games() {
+        let s = PickStats {
+            games: 4,
+            wins: 3,
+            pick_rate: 0.5,
+        };
+        assert_eq!(s.win_rate(), Some(0.75));
+        assert_eq!(PickStats { games: 0, ..s }.win_rate(), None);
+    }
+
+    #[test]
+    fn invalid_rune_pages_are_dropped_in_order() {
+        let catalog = StaticCatalog {
+            rune_trees: vec![
+                RuneTree {
+                    id: 1,
+                    slots: vec![vec![10], vec![11], vec![12], vec![13]],
+                    ..RuneTree::default()
+                },
+                RuneTree {
+                    id: 2,
+                    slots: vec![vec![20], vec![21], vec![22], vec![23]],
+                    ..RuneTree::default()
+                },
+            ],
+            stat_shard_rows: vec![vec![5008], vec![5008], vec![5001]],
+            ..StaticCatalog::default()
+        };
+        let page = |keystone: i64| RunePageOption {
+            runes: RuneSelection {
+                primary_style_id: 1,
+                sub_style_id: 2,
+                perk_ids: vec![keystone, 11, 12, 13, 21, 22, 5008, 5008, 5001],
+            },
+            stats: None,
+        };
+        let mut b = Build {
+            champion_id: 1,
+            role: Role::Any,
+            rune_pages: vec![page(99), page(10), page(98)],
+            summoner_spells: None,
+            item_blocks: vec![],
+            source: String::new(),
+        };
+        let err = b.retain_valid_rune_pages(&catalog);
+        assert_eq!(b.rune_pages, vec![page(10)]);
+        assert!(matches!(
+            err,
+            Some(RuneError::InvalidPerk {
+                position: 0,
+                perk: 99
+            })
+        ));
     }
 }

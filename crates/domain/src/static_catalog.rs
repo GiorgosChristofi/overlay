@@ -25,6 +25,25 @@ pub struct RuneInfo {
     pub description: String,
 }
 
+/// An item's display name and recipe.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ItemInfo {
+    pub name: String,
+    /// Full price in the shop, components included.
+    pub total_gold: u32,
+    /// Component item ids, as Data Dragon lists them (repeats allowed).
+    pub from: Vec<i64>,
+}
+
+impl ItemInfo {
+    pub fn named(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            ..Self::default()
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StaticCatalog {
     /// Data Dragon version, e.g. `16.19.1`.
@@ -38,8 +57,8 @@ pub struct StaticCatalog {
     pub champions: HashMap<i64, String>,
     /// Summoner spell numeric key -> display name.
     pub summoner_spells: HashMap<i64, String>,
-    /// Item id -> display name.
-    pub items: HashMap<i64, String>,
+    /// Item id -> name and recipe.
+    pub items: HashMap<i64, ItemInfo>,
     pub rune_trees: Vec<RuneTree>,
     /// Rune and stat shard id -> name and icon.
     pub runes: HashMap<i64, RuneInfo>,
@@ -64,6 +83,17 @@ impl StaticCatalog {
         }
         (!icon.is_empty() && !self.rune_image_base_url.is_empty())
             .then(|| format!("{}/{icon}", self.rune_image_base_url))
+    }
+
+    pub fn item_icon_url(&self, item_id: i64) -> Option<String> {
+        (!self.image_base_url.is_empty())
+            .then(|| format!("{}/item/{item_id}.png", self.image_base_url))
+    }
+
+    pub fn item_name(&self, id: i64) -> String {
+        self.items
+            .get(&id)
+            .map_or_else(|| format!("Item {id}"), |i| i.name.clone())
     }
 
     pub fn champion_name(&self, id: i64) -> String {

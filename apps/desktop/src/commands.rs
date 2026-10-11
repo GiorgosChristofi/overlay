@@ -40,6 +40,13 @@ pub fn save_settings(
         .core
         .save_settings(settings.clone().into())
         .map_err(|e| to_dto(&e))?;
+    if previous.overlay_enabled != settings.overlay_enabled {
+        if settings.overlay_enabled {
+            state.overlay.enable(&state.core.overlay());
+        } else {
+            state.overlay.disable();
+        }
+    }
     if previous.start_with_windows != settings.start_with_windows {
         let autolaunch = app.autolaunch();
         let result = if settings.start_with_windows {
@@ -49,9 +56,16 @@ pub fn save_settings(
         };
         if let Err(e) = result {
             tracing::warn!(error = %e, "could not change start-with-Windows");
+            // Keep the saved switch where Windows has it, as the page shows
+            // after this error, so turning it on again retries.
+            let mut kept: domain::settings::Settings = settings.into();
+            kept.start_with_windows = previous.start_with_windows;
+            if let Err(e) = state.core.save_settings(kept) {
+                tracing::warn!(error = %e, "could not restore start-with-Windows");
+            }
             return Err(AppErrorDto {
                 code: "autostart".into(),
-                message: "Settings saved, but Windows refused to change the start-up entry".into(),
+                message: "Windows refused to change the start-up entry".into(),
             });
         }
     }

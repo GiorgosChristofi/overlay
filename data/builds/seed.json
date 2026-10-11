@@ -12,8 +12,8 @@
       },
       "summonerSpells": [4, 14],
       "itemBlocks": [
-        { "title": "Starting items", "items": [1055, 2003] },
-        { "title": "Core", "items": [3047, 3071, 3053] },
+        { "title": "Starting items", "kind": "starter", "items": [1055, 2003] },
+        { "title": "Core", "kind": "core", "items": [3047, 3071, 3053] },
         { "title": "Late game", "items": [6333] }
       ]
     },
@@ -27,8 +27,8 @@
       },
       "summonerSpells": [4, 14],
       "itemBlocks": [
-        { "title": "Starting items", "items": [1056, 2003] },
-        { "title": "Core", "items": [6655, 3020, 3089] },
+        { "title": "Starting items", "kind": "starter", "items": [1056, 2003] },
+        { "title": "Core", "kind": "core", "items": [6655, 3020, 3089] },
         { "title": "Late game", "items": [3135] }
       ]
     },
@@ -42,8 +42,8 @@
       },
       "summonerSpells": [7, 4],
       "itemBlocks": [
-        { "title": "Starting items", "items": [1055, 2003] },
-        { "title": "Core", "items": [3006, 3031, 3094] },
+        { "title": "Starting items", "kind": "starter", "items": [1055, 2003] },
+        { "title": "Core", "kind": "core", "items": [3006, 3031, 3094] },
         { "title": "Late game", "items": [3046] }
       ]
     }

@@ -12,6 +12,7 @@ pub mod ports;
 pub mod runes;
 pub mod session;
 pub mod settings;
+pub mod shopping;
 pub mod spells;
 pub mod static_catalog;
 pub mod summoner;

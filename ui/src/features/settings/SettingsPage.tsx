@@ -83,6 +83,16 @@ export function SettingsPage() {
         />
       </section>
 
+      <section className="settings-group" aria-labelledby="game-title">
+        <h2 id="game-title">In game</h2>
+        <Toggle
+          label="Show the item column when I press P"
+          hint="What to build next and what it costs, over the game. Needs League in Borderless or Windowed mode."
+          checked={settings.overlayEnabled}
+          onChange={toggle("overlayEnabled")}
+        />
+      </section>
+
       <section className="settings-group" aria-labelledby="startup-title">
         <h2 id="startup-title">Startup</h2>
         <Toggle label="Start with Windows" checked={settings.startWithWindows} onChange={toggle("startWithWindows")} />

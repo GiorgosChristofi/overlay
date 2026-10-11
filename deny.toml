@@ -1,6 +1,10 @@
 # cargo-deny: licences, security advisories, duplicate and unknown sources.
 [graph]
 all-features = false
+# The targets we ship and test on. Without this, cargo-deny also checks
+# dependencies of platforms we never build (e.g. active-win-pos-rs pulls a
+# GPL crate on Linux, but we only use it on Windows).
+targets = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"]
 
 [advisories]
 version = 2
@@ -12,6 +16,10 @@ confidence-threshold = 0.9
 allow = [
   "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause",
   "ISC", "Zlib", "Unicode-3.0", "Unicode-DFS-2016", "MPL-2.0", "CC0-1.0", "BSL-1.0", "CDLA-Permissive-2.0",
+]
+# egui's built-in fonts (in-game item column).
+exceptions = [
+  { crate = "epaint_default_fonts", allow = ["OFL-1.1", "Ubuntu-font-1.0"] },
 ]
 
 [bans]

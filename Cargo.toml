@@ -1,14 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "apps/desktop"]
-# The Tauri shell needs WebView2/WebKitGTK system libraries, so plain `cargo test`
-# runs only the platform-independent crates. CI builds `apps/desktop` on Windows.
+members = ["crates/*", "apps/desktop", "apps/overlay"]
+# The Tauri shell and the egui overlay need windowing system libraries, so plain
+# `cargo test` runs only the platform-independent crates. CI builds `apps/*` on Windows.
 default-members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.90"
+rust-version = "1.99"
 license = "MIT"
 publish = false
 
@@ -16,6 +16,7 @@ publish = false
 # internal
 domain = { path = "crates/domain" }
 lcu-client = { path = "crates/lcu-client" }
+overlay = { path = "apps/overlay" }
 opgg = { path = "crates/opgg" }
 static-data = { path = "crates/static-data" }
 app-core = { path = "crates/app-core" }

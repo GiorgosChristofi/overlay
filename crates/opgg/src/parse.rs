@@ -5,7 +5,7 @@
 //! null, so OP.GG adding, removing or emptying a field degrades one part of
 //! the build instead of failing the whole import.
 
-use domain::builds::{Build, ItemBlock, PickStats, RunePageOption};
+use domain::builds::{BlockKind, Build, ItemBlock, PickStats, RunePageOption};
 use domain::champ_select::Role;
 use domain::runes::RuneSelection;
 use serde::{Deserialize, Deserializer};
@@ -263,33 +263,42 @@ fn win_rate_suffix(e: &Entry) -> String {
 fn item_blocks(data: &Data) -> Vec<ItemBlock> {
     let mut blocks = Vec::new();
     let mut used: Vec<i64> = Vec::new();
-    for (title, entries) in [
-        ("Starting items", &data.starter_items),
-        ("Core build", &data.core_items),
-        ("Boots", &data.boots),
+    for (title, kind, entries) in [
+        ("Starting items", BlockKind::Starter, &data.starter_items),
+        ("Core build", BlockKind::Core, &data.core_items),
+        ("Boots", BlockKind::Boots, &data.boots),
     ] {
         if let Some(best) = entries.iter().find(|e| !e.ids.is_empty()) {
             blocks.push(ItemBlock {
                 title: format!("{title}{}", win_rate_suffix(best)),
                 items: best.ids.clone(),
+                kind,
+                pick_rates: Vec::new(),
             });
             used.extend(&best.ids);
         }
     }
 
+    // Most built items after the core, with how often each one is built.
     let mut situational: Vec<i64> = Vec::new();
-    for id in data.last_items.iter().flat_map(|e| &e.ids) {
-        if situational.len() == MAX_SITUATIONAL_ITEMS {
-            break;
-        }
-        if !used.contains(id) && !situational.contains(id) {
-            situational.push(*id);
+    let mut pick_rates: Vec<f64> = Vec::new();
+    for entry in &data.last_items {
+        for id in &entry.ids {
+            if situational.len() < MAX_SITUATIONAL_ITEMS
+                && !used.contains(id)
+                && !situational.contains(id)
+            {
+                situational.push(*id);
+                pick_rates.push(entry.pick_rate);
+            }
         }
     }
     if !situational.is_empty() {
         blocks.push(ItemBlock {
             title: "Situational".into(),
             items: situational,
+            kind: BlockKind::Situational,
+            pick_rates,
         });
     }
     blocks
@@ -354,6 +363,19 @@ mod tests {
         assert_eq!(b.item_blocks[1].items, [6655, 4646, 4645]);
         assert_eq!(b.item_blocks[1].title, "Core build · 54% win rate");
         assert_eq!(b.item_blocks[2].items, [3020]);
+        let kinds: Vec<BlockKind> = b.item_blocks.iter().map(|blk| blk.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                BlockKind::Starter,
+                BlockKind::Core,
+                BlockKind::Boots,
+                BlockKind::Situational
+            ]
+        );
+        // Lux's most built items after the core: Malignance (35%), then Rylai's (31%).
+        assert_eq!(b.item_blocks[3].items[..2], [3118, 3089]);
+        assert_eq!(b.item_blocks[3].pick_rates[..2], [0.3547, 0.3119]);
         let situational = &b.item_blocks[3].items;
         assert_eq!(situational.len(), MAX_SITUATIONAL_ITEMS);
         assert!(

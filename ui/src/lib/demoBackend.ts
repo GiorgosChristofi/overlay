@@ -42,6 +42,7 @@ let settings: SettingsDto = {
   replaceCurrentPageWhenFull: false,
   startWithWindows: true,
   startMinimized: false,
+  overlayEnabled: true,
 };
 
 const noop = async () => () => {};

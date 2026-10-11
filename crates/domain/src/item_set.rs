@@ -15,8 +15,9 @@ pub struct ItemSet {
 }
 
 /// Builds an item set from a build, dropping items that no longer exist this patch.
+/// `role` names it in the shop, e.g. `Bottom` or `ARAM`.
 /// Returns the set and the ids that were dropped.
-pub fn item_set_for(build: &Build, catalog: &StaticCatalog) -> (ItemSet, Vec<i64>) {
+pub fn item_set_for(build: &Build, role: &str, catalog: &StaticCatalog) -> (ItemSet, Vec<i64>) {
     let mut dropped = Vec::new();
     let blocks = build
         .item_blocks
@@ -44,7 +45,7 @@ pub fn item_set_for(build: &Build, catalog: &StaticCatalog) -> (ItemSet, Vec<i64
         title: format!(
             "LoL Overlay: {} {}",
             catalog.champion_name(build.champion_id),
-            build.role.label()
+            role
         ),
         champion_id: build.champion_id,
         blocks,
@@ -55,13 +56,16 @@ pub fn item_set_for(build: &Build, catalog: &StaticCatalog) -> (ItemSet, Vec<i64
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builds::ItemBlock;
+    use crate::builds::{BlockKind, ItemBlock};
     use crate::champ_select::Role;
 
     #[test]
     fn drops_items_removed_this_patch() {
         let mut catalog = StaticCatalog::default();
-        catalog.items.insert(1055, "Doran's Blade".into());
+        catalog.items.insert(
+            1055,
+            crate::static_catalog::ItemInfo::named("Doran's Blade"),
+        );
         catalog.champions.insert(222, "Jinx".into());
         let build = Build {
             champion_id: 222,
@@ -72,15 +76,19 @@ mod tests {
                 ItemBlock {
                     title: "Start".into(),
                     items: vec![1055, 999_999],
+                    kind: BlockKind::Starter,
+                    pick_rates: vec![],
                 },
                 ItemBlock {
                     title: "Gone".into(),
                     items: vec![888_888],
+                    kind: BlockKind::Other,
+                    pick_rates: vec![],
                 },
             ],
             source: String::new(),
         };
-        let (set, dropped) = item_set_for(&build, &catalog);
+        let (set, dropped) = item_set_for(&build, build.role.label(), &catalog);
         assert_eq!(set.blocks, vec![("Start".to_string(), vec![1055])]);
         assert_eq!(dropped, vec![999_999, 888_888]);
         assert_eq!(set.uid, "lol-overlay-222");

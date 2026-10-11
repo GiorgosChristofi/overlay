@@ -133,8 +133,13 @@ pub async fn run_import(
             .await
         }
     };
+    // A source may resolve "no assigned role" to the champion's main role.
+    let role = match pick.mode {
+        GameMode::Aram => pick.role_label(),
+        GameMode::SummonersRift => build.role.label(),
+    };
     let item_set = if settings.import_item_sets {
-        import_item_set(port, build, catalog, summoner_id).await
+        import_item_set(port, build, role, catalog, summoner_id).await
     } else {
         StepOutcome::Skipped(TURNED_OFF.into())
     };
@@ -145,11 +150,7 @@ pub async fn run_import(
     };
     ImportReport {
         champion_name,
-        // A source may resolve "no assigned role" to the champion's main role.
-        role: match pick.mode {
-            GameMode::Aram => pick.role_label().to_owned(),
-            GameMode::SummonersRift => build.role.label().to_owned(),
-        },
+        role: role.to_owned(),
         runes,
         item_set,
         summoner_spells,
@@ -246,13 +247,14 @@ async fn import_runes(
 async fn import_item_set(
     port: &dyn LcuPort,
     build: &Build,
+    role: &str,
     catalog: &StaticCatalog,
     summoner_id: i64,
 ) -> StepOutcome {
     if summoner_id == 0 {
         return StepOutcome::Failed("Your summoner profile has not loaded yet".into());
     }
-    let (set, dropped) = item_set_for(build, catalog);
+    let (set, dropped) = item_set_for(build, role, catalog);
     let count: usize = set.blocks.iter().map(|(_, items)| items.len()).sum();
     if count == 0 {
         return StepOutcome::Skipped(format!(

@@ -138,6 +138,7 @@ pub struct SettingsDto {
     pub replace_current_page_when_full: bool,
     pub start_with_windows: bool,
     pub start_minimized: bool,
+    pub overlay_enabled: bool,
 }
 
 /// Every command error the UI can receive.
@@ -179,6 +180,7 @@ impl From<Settings> for SettingsDto {
             replace_current_page_when_full: s.replace_current_page_when_full,
             start_with_windows: s.start_with_windows,
             start_minimized: s.start_minimized,
+            overlay_enabled: s.overlay_enabled,
         }
     }
 }
@@ -193,8 +195,123 @@ impl From<SettingsDto> for Settings {
             replace_current_page_when_full: s.replace_current_page_when_full,
             start_with_windows: s.start_with_windows,
             start_minimized: s.start_minimized,
+            overlay_enabled: s.overlay_enabled,
         }
     }
+}
+
+// ---------- in-game overlay ----------
+//
+// The desktop app sends the overlay process (`desktop --overlay`) one JSON
+// [`OverlayMessage`] per stdin line; the overlay answers with
+// [`OverlayCommand`] lines on its stdout. Rust on both ends, so no
+// TypeScript is generated.
+
+/// A message to the overlay process.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "view", rename_all = "camelCase")]
+pub enum OverlayMessage {
+    /// What to show; replaces the previous view.
+    Items(Box<OverlayViewDto>),
+    /// No build (yet): show the empty state.
+    Clear,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayViewDto {
+    pub champion_name: String,
+    pub role: String,
+    pub source: String,
+    /// Current gold, `None` outside a running game.
+    pub gold: Option<u32>,
+    /// Starting items not bought yet. While present, they are what to buy
+    /// first; the list below leaves them out.
+    pub starting: Option<StartingItemsDto>,
+    /// The next item to build (never boots), broken into its recipe.
+    pub next: Option<RecipeNodeDto>,
+    /// The recommended boots until bought, broken into their recipe.
+    pub boots: Option<RecipeNodeDto>,
+    /// `next` was chosen by the player, not picked automatically.
+    pub next_pinned: bool,
+    /// Items the player removed from the list this game.
+    pub removed_count: u32,
+    /// Recommended items not bought yet; starting items first while relevant.
+    pub blocks: Vec<OverlayBlockDto>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OverlayBlockKind {
+    Starter,
+    Core,
+    Boots,
+    Situational,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayBlockDto {
+    pub kind: OverlayBlockKind,
+    pub title: String,
+    pub items: Vec<OverlayItemDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayItemDto {
+    pub id: i32,
+    pub name: String,
+    pub icon_url: Option<String>,
+    /// Full shop price.
+    pub cost: u32,
+    /// How many the build recommends (e.g. 2 potions).
+    pub count: u32,
+    /// Share of games that built it, `0.0..=1.0`, when known.
+    pub pick_rate: Option<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartingItemsDto {
+    pub items: Vec<OverlayItemDto>,
+    /// Price of everything listed, counts included.
+    pub cost: u32,
+    /// The player has the gold for all of them now.
+    pub affordable: bool,
+}
+
+/// What the player did in the overlay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum OverlayCommand {
+    /// Build this item next instead of the automatic choice.
+    SetNext { item_id: i32 },
+    /// Back to the automatic next item.
+    ClearNext,
+    /// Take an item off the list for this game.
+    Remove { item_id: i32 },
+    /// Put every removed item back.
+    RestoreRemoved,
+}
+
+/// One item of a recipe tree.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecipeNodeDto {
+    pub item: OverlayItemDto,
+    /// Held in the inventory.
+    pub owned: bool,
+    /// Gold still needed for it, counting owned components.
+    pub remaining_cost: u32,
+    /// Not owned and the player has the gold for it now.
+    pub affordable: bool,
+    pub components: Vec<RecipeNodeDto>,
 }
 
 #[cfg(test)]
@@ -220,6 +337,42 @@ mod tests {
         assert_eq!(
             json,
             serde_json::json!({ "status": "skipped", "reason": "off" })
+        );
+    }
+
+    #[test]
+    fn overlay_messages_are_tagged_json_lines() {
+        assert_eq!(
+            serde_json::to_string(&OverlayMessage::Clear).unwrap(),
+            r#"{"type":"clear"}"#
+        );
+        let view = OverlayViewDto {
+            champion_name: "Lux".into(),
+            role: "Middle".into(),
+            source: "OP.GG".into(),
+            gold: Some(500),
+            starting: None,
+            next: None,
+            boots: None,
+            next_pinned: false,
+            removed_count: 0,
+            blocks: vec![],
+        };
+        let line = serde_json::to_string(&OverlayMessage::Items(Box::new(view.clone()))).unwrap();
+        assert!(!line.contains('\n'));
+        assert_eq!(
+            serde_json::from_str::<OverlayMessage>(&line).unwrap(),
+            OverlayMessage::Items(Box::new(view))
+        );
+    }
+
+    #[test]
+    fn overlay_commands_are_tagged_camel_case() {
+        let line = serde_json::to_string(&OverlayCommand::SetNext { item_id: 6655 }).unwrap();
+        assert_eq!(line, r#"{"type":"setNext","itemId":6655}"#);
+        assert_eq!(
+            serde_json::from_str::<OverlayCommand>(r#"{"type":"restoreRemoved"}"#).unwrap(),
+            OverlayCommand::RestoreRemoved
         );
     }
 

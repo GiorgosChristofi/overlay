@@ -13,6 +13,15 @@ describe("SettingsPage", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("Saved");
   });
 
+  it("turns the in-game item column off", async () => {
+    const { backend } = fakeBackend();
+    renderWith(backend, <SettingsPage />);
+    const toggle = await screen.findByRole("switch", { name: "Show the item column when I press P" });
+    expect(toggle).toBeChecked();
+    await userEvent.click(toggle);
+    expect(backend.saveSettings).toHaveBeenCalledWith({ ...defaultSettings, overlayEnabled: false });
+  });
+
   it("switches the Flash key", async () => {
     const { backend } = fakeBackend();
     renderWith(backend, <SettingsPage />);

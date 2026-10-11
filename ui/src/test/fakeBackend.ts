@@ -15,6 +15,7 @@ export const defaultSettings: SettingsDto = {
   replaceCurrentPageWhenFull: false,
   startWithWindows: false,
   startMinimized: false,
+  overlayEnabled: true,
 };
 
 export const disconnected: StatusDto = { session: "disconnected", summoner: null, patch: null };

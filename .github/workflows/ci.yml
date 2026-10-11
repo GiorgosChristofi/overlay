@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
@@ -65,7 +65,7 @@ jobs:
     needs: [rust, ui]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
@@ -78,7 +78,8 @@ jobs:
         working-directory: ui
       - run: ./scripts/fetch-riot-cert.ps1
         shell: pwsh
-      - run: cargo clippy -p desktop --all-targets -- -D warnings
+      - run: cargo clippy -p desktop -p overlay --all-targets -- -D warnings
+      - run: cargo test -p overlay
       - run: cargo install tauri-cli --version "^2" --locked
       - name: Build installer
         working-directory: apps/desktop

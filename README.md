@@ -6,7 +6,11 @@ A League of Legends companion for Windows. Rust core, React UI, Tauri 2 shell.
 the session phase, and as soon as you hover or lock in a champion it sets your
 rune page, item set and summoner spells from OP.GG statistics for your role (or ARAM). The
 app lists OP.GG's top rune pages with win and pick rates and draws each as a
-rune tree; hover a rune to see what it does, click a page to switch to it. The in-game overlay is Phase 2.
+rune tree; hover a rune to see what it does, click a page to switch to it.
+
+**Phase 2** (started): in game, press **P** and a movable column shows what
+to build: the next item broken into its components with your gold, and the
+rest of the build, with bought items removed.
 
 LoL Overlay is not endorsed by Riot Games and does not reflect the views or
 opinions of Riot Games or anyone officially involved in producing or managing
@@ -47,6 +51,7 @@ crates/opgg          OP.GG champion statistics -> builds (runes, spells, items)
 crates/app-core      session service and champ-select import
 crates/ipc-types     DTOs shared with React; generates ui/src/bindings
 apps/desktop         Tauri shell: window, tray, commands
+apps/overlay         in-game item column (egui), run as `desktop --overlay`
 ui/                  React + TypeScript (Vite)
 data/builds          seed builds, used when OP.GG is unreachable
 fixtures/            payloads for contract tests
@@ -61,11 +66,12 @@ with in-memory fakes.
 
 | Command | What it runs |
 | --- | --- |
-| `cargo test` | 124 Rust tests: unit, property (`proptest`), contract (fixtures), fake-client integration, fake-CDN integration. Also regenerates TS bindings. |
+| `cargo test` | 163 Rust tests: unit, property (`proptest`), contract (fixtures), fake-client integration, fake-CDN integration. Also regenerates TS bindings. |
 | `cargo test -p static-data --test seed_builds -- --ignored` | Checks seed builds against the live patch (network) |
 | `cargo test -p opgg -- --ignored` | Checks the live OP.GG API still parses (network) |
+| `cargo test -p overlay` | The in-game column's state and input rules (Windows, like the shell) |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Lints, including the Tauri shell. `unwrap`, `expect` and `panic` are denied outside tests |
-| `cd ui && npm test` | 21 component tests with a fake backend |
+| `cd ui && npm test` | 22 component tests with a fake backend |
 | `cd ui && npm run lint && npm run typecheck` | ESLint (strict TS rules) and `tsc` |
 
 `cargo test` skips `apps/desktop` (see `default-members`) so it runs on any OS.
@@ -100,6 +106,47 @@ at runtime: a build with a rune, item or spell that no longer exists is
 skipped (or the dead items dropped) and the reason shows in the app.
 `championId` is Data Dragon's numeric `key`; `role` is `top`, `jungle`,
 `middle`, `bottom`, `support` or `any`.
+
+## In-game item column (Phase 2)
+
+Press **P** in game (the shop key) to open the full column with the shop;
+**P** again, **Esc** or **–** shrinks it to a one-line strip with the next
+item and the gold it still needs. Click the strip to open the column without
+the shop. Drag the column by its header; it remembers where you put it. It
+only shows while the game window is focused. The column shows:
+
+- **What to buy now**: at the start of the game, the starting items. After
+  that, the boots (until bought, since many players buy them later) and the
+  next item: the first core item not bought yet, then situational. Each is
+  broken into its recipe; components you hold are crossed out, and gold
+  amounts turn green when your current gold covers them.
+- **Core, boots, situational**: the rest of the build, with how often each
+  situational item is built. Items leave the list once bought.
+- **Your choices**: click an item to build it next instead (click again, or
+  "automatic", to undo); click its **×** to take it off the list ("Restore"
+  at the bottom brings removed items back). Choices last for the game.
+
+How it works: the desktop app starts a second process of itself
+(`desktop --overlay`, egui) and sends it the view as JSON lines. It reads
+gold and items once a second from Riot's Live Client Data API
+(`https://127.0.0.1:2999`, local and read-only) and recipes from Data
+Dragon. The overlay only reads key state and which window is focused; it
+never touches game memory. It reacts only while League's game window is
+focused. Turn it off in Settings → In game.
+
+Requirements and limits:
+
+- League must run in **Borderless** or **Windowed** mode; nothing can draw
+  over exclusive fullscreen.
+- The game does not tell anyone whether its shop is open (the Live Client
+  Data API has no UI state), so the column follows your P presses. If you
+  close the shop with its own X, shrink the column with its **–** rather than
+  pressing P again.
+- Typing "p" in chat also toggles it, and items sold back still count as bought.
+- To work on it without a game: pipe an `OverlayMessage` JSON line into
+  `desktop --overlay` with `LOL_OVERLAY_OPEN=1` (start open) and
+  `LOL_OVERLAY_ANY_WINDOW=1` (treat any window as the game). Clicks come
+  out on stdout as `OverlayCommand` JSON lines.
 
 ## Phase 1 status
 

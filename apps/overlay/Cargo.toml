@@ -1,0 +1,23 @@
+[package]
+name = "overlay"
+description = "In-game item column (egui), run as `desktop --overlay`."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "persistence"] }
+egui_extras = { version = "0.36", default-features = false, features = ["image", "http"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+ipc-types.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+active-win-pos-rs = "0.11"
+device_query = "4"
+
+[lints]
+workspace = true

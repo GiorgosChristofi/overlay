@@ -106,7 +106,8 @@ impl ChampionPick {
 
 /// Returns the champion the local player has chosen or is hovering, if any.
 ///
-/// - Draft and blind: the locked champion once the pick is completed; before
+/// - Draft and blind: the locked champion once the pick is completed (or the
+///   one traded for afterwards); before
 ///   that the hovered one (the pick action's champion during the player's
 ///   turn, `championPickIntent` before it).
 /// - Modes without pick actions (e.g. ARAM): the assigned champion.
@@ -129,14 +130,19 @@ pub fn selected_pick(session: &ChampSelectSession) -> Option<ChampionPick> {
         .filter(|a| a.actor_cell_id == session.local_player_cell_id && a.kind == "pick")
         .collect();
 
+    let locked = my_picks.iter().find(|a| a.completed && a.champion_id > 0);
+    let hovered = my_picks.iter().find(|a| !a.completed && a.champion_id > 0);
     let champion_id = if my_picks.is_empty() {
         me.champion_id
+    } else if let Some(locked) = locked {
+        // A trade after lock-in changes the team entry, not the action.
+        if me.champion_id > 0 {
+            me.champion_id
+        } else {
+            locked.champion_id
+        }
     } else {
-        let locked = my_picks.iter().find(|a| a.completed && a.champion_id > 0);
-        let hovered = my_picks.iter().find(|a| !a.completed && a.champion_id > 0);
-        locked
-            .or(hovered)
-            .map_or(me.champion_pick_intent, |a| a.champion_id)
+        hovered.map_or(me.champion_pick_intent, |a| a.champion_id)
     };
     (champion_id > 0).then_some(ChampionPick {
         champion_id,
@@ -200,6 +206,14 @@ mod tests {
         let mut s = session(vec![vec![pick(2, 99, true)]], 99);
         s.my_team[1].champion_pick_intent = 103;
         assert_eq!(selected_pick(&s).map(|p| p.champion_id), Some(99));
+    }
+
+    #[test]
+    fn a_champion_traded_after_lock_in_replaces_the_locked_one() {
+        // A trade changes the team entry; the pick action keeps the
+        // champion originally locked.
+        let s = session(vec![vec![pick(2, 99, true)]], 103);
+        assert_eq!(selected_pick(&s).map(|p| p.champion_id), Some(103));
     }
 
     #[test]

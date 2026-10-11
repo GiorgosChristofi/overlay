@@ -50,11 +50,31 @@ impl PickStats {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemBlock {
     pub title: String,
     pub items: Vec<i64>,
+    #[serde(default)]
+    pub kind: BlockKind,
+    /// Share of games that built each item, parallel to `items`; empty when
+    /// the source has no per-item statistics.
+    #[serde(default)]
+    pub pick_rates: Vec<f64>,
+}
+
+/// What a block is for. The in-game column treats starting items as an
+/// early-game section and picks the next item to build from the others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BlockKind {
+    Starter,
+    Core,
+    Boots,
+    Situational,
+    #[default]
+    #[serde(other)]
+    Other,
 }
 
 /// The seed file's shape: one rune page per build.

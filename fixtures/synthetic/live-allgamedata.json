@@ -1,0 +1,33 @@
+{
+  "activePlayer": {
+    "currentGold": 1337.6,
+    "level": 6,
+    "riotId": "Tester#EUNE",
+    "riotIdGameName": "Tester",
+    "summonerName": "Tester#EUNE",
+    "championStats": { "abilityPower": 120.0 },
+    "unknownFutureField": true
+  },
+  "allPlayers": [
+    {
+      "championName": "Garen",
+      "riotId": "Enemy#EUW",
+      "summonerName": "Enemy#EUW",
+      "team": "CHAOS",
+      "items": [{ "itemID": 1055, "count": 1, "slot": 0, "displayName": "Doran's Blade", "price": 450 }]
+    },
+    {
+      "championName": "Lux",
+      "riotId": "Tester#EUNE",
+      "summonerName": "Tester#EUNE",
+      "team": "ORDER",
+      "items": [
+        { "itemID": 3802, "count": 1, "slot": 0, "displayName": "Lost Chapter", "price": 1200, "canUse": false, "consumable": false },
+        { "itemID": 2003, "count": 2, "slot": 1, "displayName": "Health Potion", "price": 50, "canUse": true, "consumable": true },
+        { "itemID": 3340, "count": 1, "slot": 6, "displayName": "Stealth Ward", "price": 0 }
+      ]
+    }
+  ],
+  "events": { "Events": [{ "EventID": 0, "EventName": "GameStart", "EventTime": 0.05 }] },
+  "gameData": { "gameMode": "CLASSIC", "gameTime": 612.4 }
+}

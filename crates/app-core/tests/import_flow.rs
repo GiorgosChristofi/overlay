@@ -4,18 +4,24 @@
 
 use app_core::{Core, CoreError, EventSink, SeedBuilds, SettingsStore};
 use async_trait::async_trait;
-use domain::builds::{Build, BuildCatalog, ItemBlock, PickStats, RunePageOption};
+use domain::builds::{BlockKind, Build, BuildCatalog, ItemBlock, PickStats, RunePageOption};
 use domain::champ_select::{Action, ChampSelectSession, ChampionPick, Role, TeamMember};
 use domain::item_set::ItemSet;
 use domain::phase::GameflowPhase;
+use domain::ports::LiveSnapshot;
 use domain::ports::{BuildSource, LcuEvent, LcuPort};
 use domain::runes::{ExistingPage, NewRunePage, RuneSelection};
 use domain::settings::Settings;
-use domain::static_catalog::{RuneTree, StaticCatalog};
+use domain::static_catalog::{ItemInfo, RuneTree, StaticCatalog};
 use domain::summoner::Summoner;
 use domain::PortError;
-use ipc_types::{ImportReportDto, SessionStateDto, StatusDto, StepResultDto};
+use ipc_types::{
+    ImportReportDto, OverlayBlockKind, OverlayCommand, OverlayMessage, SessionStateDto, StatusDto,
+    StepResultDto,
+};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use tokio::sync::Notify;
 
 // ---------- fakes ----------
 
@@ -24,6 +30,7 @@ struct FakeLcu {
     pages: Mutex<Vec<ExistingPage>>,
     owned_pages: u32,
     calls: Mutex<Vec<String>>,
+    item_sets: Mutex<Vec<ItemSet>>,
     fail_runes: bool,
 }
 
@@ -80,6 +87,7 @@ impl LcuPort for FakeLcu {
     }
     async fn upsert_item_set(&self, summoner_id: i64, set: &ItemSet) -> Result<(), PortError> {
         self.log(format!("item_set {summoner_id} {}", set.uid));
+        self.item_sets.lock().unwrap().push(set.clone());
         Ok(())
     }
     async fn set_summoner_spells(&self, spells: [i64; 2]) -> Result<(), PortError> {
@@ -115,10 +123,34 @@ impl BuildSource for FakeSource {
     }
 }
 
+/// Has no builds (the seed answers), but can hold the next lookup until
+/// released, to finish an import late.
+#[derive(Debug, Default)]
+struct GatedSource {
+    hold_next: AtomicBool,
+    holding: Notify,
+    release: Notify,
+}
+
+#[async_trait]
+impl BuildSource for GatedSource {
+    fn name(&self) -> &str {
+        "OP.GG"
+    }
+    async fn build(&self, _pick: ChampionPick) -> Result<Option<Build>, PortError> {
+        if self.hold_next.swap(false, Ordering::SeqCst) {
+            self.holding.notify_one();
+            self.release.notified().await;
+        }
+        Ok(None)
+    }
+}
+
 #[derive(Debug, Default)]
 struct RecordingSink {
     statuses: Mutex<Vec<StatusDto>>,
     imports: Mutex<Vec<ImportReportDto>>,
+    overlays: Mutex<Vec<OverlayMessage>>,
 }
 
 impl EventSink for RecordingSink {
@@ -127,6 +159,9 @@ impl EventSink for RecordingSink {
     }
     fn import(&self, report: &ImportReportDto) {
         self.imports.lock().unwrap().push(report.clone());
+    }
+    fn overlay(&self, message: &OverlayMessage) {
+        self.overlays.lock().unwrap().push(message.clone());
     }
 }
 
@@ -178,9 +213,9 @@ fn catalog() -> Arc<StaticCatalog> {
         (7, "Heal".to_string()),
     ]);
     c.items.extend([
-        (1056, "Doran's Ring".to_string()),
-        (2003, "Health Potion".to_string()),
-        (1055, "Doran's Blade".to_string()),
+        (1056, ItemInfo::named("Doran's Ring")),
+        (2003, ItemInfo::named("Health Potion")),
+        (1055, ItemInfo::named("Doran's Blade")),
     ]);
     Arc::new(c)
 }
@@ -229,6 +264,30 @@ impl Harness {
     }
     fn imports(&self) -> Vec<ImportReportDto> {
         self.sink.imports.lock().unwrap().clone()
+    }
+    fn overlays(&self) -> Vec<OverlayMessage> {
+        self.sink.overlays.lock().unwrap().clone()
+    }
+    /// Item ids per block of the last overlay view.
+    fn overlay_items(&self) -> Vec<(OverlayBlockKind, Vec<i32>)> {
+        match self.overlays().last() {
+            Some(OverlayMessage::Items(view)) => view
+                .starting
+                .iter()
+                .map(|s| {
+                    (
+                        OverlayBlockKind::Starter,
+                        s.items.iter().map(|i| i.id).collect(),
+                    )
+                })
+                .chain(
+                    view.blocks
+                        .iter()
+                        .map(|b| (b.kind, b.items.iter().map(|i| i.id).collect())),
+                )
+                .collect(),
+            other => panic!("expected items, got {other:?}"),
+        }
     }
 }
 
@@ -287,6 +346,8 @@ fn live_lux_build() -> Build {
         item_blocks: vec![ItemBlock {
             title: "Starting items".into(),
             items: vec![1056, 2003, 2003],
+            kind: BlockKind::Starter,
+            pick_rates: vec![],
         }],
         source: "OP.GG EUNE · Emerald+ · patch 16.19".into(),
     }
@@ -816,4 +877,238 @@ async fn rune_catalog_describes_the_patch_trees() {
     assert_eq!(c.trees[1].name, "Sorcery");
     assert_eq!(c.trees[1].slots[0].len(), 3);
     assert_eq!(c.stat_shard_rows.len(), 3);
+}
+
+// ---------- in-game item column ----------
+
+#[tokio::test]
+async fn the_overlay_gets_the_build_after_import() {
+    let h = harness(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+    );
+    h.connect_and_enter_champ_select().await;
+    assert!(h.overlays().is_empty() || h.overlays().last() == Some(&OverlayMessage::Clear));
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
+        .await;
+    match h.overlays().last() {
+        Some(OverlayMessage::Items(view)) => {
+            assert_eq!(
+                (view.champion_name.as_str(), view.role.as_str()),
+                ("Lux", "Middle")
+            );
+            assert_eq!(view.gold, None);
+        }
+        other => panic!("expected items, got {other:?}"),
+    }
+    // The seed's Lux items known to the test patch: Doran's Ring and a potion.
+    assert_eq!(
+        h.overlay_items(),
+        [(OverlayBlockKind::Starter, vec![1056, 2003])]
+    );
+    assert_eq!(h.core.overlay(), h.overlays().last().cloned().unwrap());
+}
+
+#[tokio::test]
+async fn bought_items_leave_the_overlay_and_unchanged_ticks_send_nothing() {
+    let h = harness(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+    );
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
+        .await;
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::InProgress))
+        .await;
+
+    let snapshot = LiveSnapshot {
+        gold: 100,
+        inventory: vec![(1056, 1), (3340, 1)],
+    };
+    h.core.live_tick(Some(snapshot.clone()));
+    assert_eq!(h.overlay_items(), [(OverlayBlockKind::Starter, vec![2003])]);
+    let sent = h.overlays().len();
+    h.core.live_tick(Some(snapshot));
+    assert_eq!(h.overlays().len(), sent, "same game state, nothing sent");
+
+    // The potion was drunk: it stays bought, and the starter block is empty.
+    h.core.live_tick(Some(LiveSnapshot {
+        gold: 150,
+        inventory: vec![(2003, 1)],
+    }));
+    h.core.live_tick(Some(LiveSnapshot {
+        gold: 200,
+        inventory: vec![(1056, 1)],
+    }));
+    assert_eq!(h.overlay_items(), []);
+}
+
+#[tokio::test]
+async fn a_new_game_forgets_what_was_bought_and_disconnect_clears_the_overlay() {
+    let h = harness(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+    );
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
+        .await;
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::InProgress))
+        .await;
+    h.core.live_tick(Some(LiveSnapshot {
+        gold: 0,
+        inventory: vec![(1056, 1)],
+    }));
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::EndOfGame))
+        .await;
+    assert_eq!(
+        h.overlay_items(),
+        [(OverlayBlockKind::Starter, vec![1056, 2003])],
+        "after the game the full build is back"
+    );
+
+    h.core.handle(LcuEvent::Disconnected).await;
+    assert_eq!(h.overlays().last(), Some(&OverlayMessage::Clear));
+}
+
+#[tokio::test]
+async fn choices_in_the_column_change_the_view_and_reset_with_the_game() {
+    let h = harness(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+    );
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
+        .await;
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::InProgress))
+        .await;
+
+    h.core
+        .overlay_command(OverlayCommand::Remove { item_id: 2003 });
+    assert_eq!(h.overlay_items(), [(OverlayBlockKind::Starter, vec![1056])]);
+
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::EndOfGame))
+        .await;
+    assert_eq!(
+        h.overlay_items(),
+        [(OverlayBlockKind::Starter, vec![1056, 2003])],
+        "a new game starts from the full build"
+    );
+}
+
+#[tokio::test]
+async fn aram_item_sets_are_titled_aram() {
+    let h = harness(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+    );
+    h.connect_and_enter_champ_select().await;
+    let mut aram = session(222, "", false);
+    aram.actions.clear();
+    aram.bench_enabled = true;
+    h.core.handle(LcuEvent::ChampSelect(Some(aram))).await;
+    let sets = h.lcu.item_sets.lock().unwrap().clone();
+    assert_eq!(sets.last().unwrap().title, "LoL Overlay: Jinx ARAM");
+    assert_eq!(h.imports()[0].role, "ARAM");
+}
+
+#[tokio::test]
+async fn import_again_finishing_late_does_not_undo_a_newer_pick() {
+    let gate = Arc::new(GatedSource::default());
+    let h = harness_with(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+        vec![gate.clone()],
+    );
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", false))))
+        .await;
+
+    // "Import again" for Lux is still looking up its build...
+    gate.hold_next.store(true, Ordering::SeqCst);
+    let core = h.core.clone();
+    let again = tokio::spawn(async move { core.reimport().await });
+    gate.holding.notified().await;
+    // ...when the player hovers Jinx.
+    let core = h.core.clone();
+    let hover = tokio::spawn(async move {
+        core.handle(LcuEvent::ChampSelect(Some(session(222, "bottom", false))))
+            .await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    gate.release.notify_one();
+    let _ = again.await.unwrap();
+    hover.await.unwrap();
+
+    assert_eq!(h.core.last_import().unwrap().champion_name, "Jinx");
+    assert!(
+        last_page_created(&h.lcu).contains("Jinx"),
+        "{:?}",
+        h.lcu.calls()
+    );
+    match h.core.overlay() {
+        OverlayMessage::Items(view) => assert_eq!(view.champion_name, "Jinx"),
+        other => panic!("expected items, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_late_read_after_the_game_ended_changes_nothing() {
+    let h = harness(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+    );
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
+        .await;
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::InProgress))
+        .await;
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::EndOfGame))
+        .await;
+    // A read started during the game answers after it ended.
+    h.core.live_tick(Some(LiveSnapshot {
+        gold: 500,
+        inventory: vec![(1056, 1)],
+    }));
+    assert_eq!(
+        h.overlay_items(),
+        [(OverlayBlockKind::Starter, vec![1056, 2003])]
+    );
+    match h.core.overlay() {
+        OverlayMessage::Items(view) => assert_eq!(view.gold, None),
+        other => panic!("expected items, got {other:?}"),
+    }
 }

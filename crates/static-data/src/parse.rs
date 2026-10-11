@@ -1,5 +1,5 @@
 use crate::StaticDataError;
-use domain::static_catalog::{RuneInfo, RuneTree, StaticCatalog};
+use domain::static_catalog::{ItemInfo, RuneInfo, RuneTree, StaticCatalog};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -140,6 +140,27 @@ struct Items {
 #[derive(Deserialize)]
 struct ItemEntry {
     name: String,
+    /// Component ids as strings, e.g. `["3802", "3145"]`.
+    #[serde(default)]
+    from: Vec<String>,
+    #[serde(default)]
+    gold: Gold,
+}
+
+#[derive(Deserialize, Default)]
+struct Gold {
+    #[serde(default)]
+    total: u32,
+}
+
+impl ItemEntry {
+    fn info(self) -> ItemInfo {
+        ItemInfo {
+            name: self.name,
+            total_gold: self.gold.total,
+            from: self.from.iter().filter_map(|id| id.parse().ok()).collect(),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -233,7 +254,7 @@ pub fn parse_catalog(version: &str, raw: &RawFiles<'_>) -> Result<StaticCatalog,
         items: items
             .data
             .into_iter()
-            .filter_map(|(id, e)| id.parse().ok().map(|id| (id, e.name)))
+            .filter_map(|(id, e)| id.parse().ok().map(|id| (id, e.info())))
             .collect(),
         rune_trees: trees
             .into_iter()
@@ -263,6 +284,19 @@ mod tests {
             plain_text(raw),
             "Damaging a Champion deals adaptive damage.\n\nDamage: 30 (+0.1 bonus AD)\nCooldown: 35s\nOnly champions."
         );
+    }
+
+    #[test]
+    fn items_carry_their_recipe_and_price() {
+        let raw = r#"{"name": "Luden's Echo", "from": ["3802", "3145", "bad"], "gold": {"base": 450, "total": 2750}}"#;
+        let info = serde_json::from_str::<ItemEntry>(raw).unwrap().info();
+        assert_eq!(info.name, "Luden's Echo");
+        assert_eq!(info.total_gold, 2750);
+        assert_eq!(info.from, [3802, 3145]);
+        let basic = serde_json::from_str::<ItemEntry>(r#"{"name": "Tome"}"#)
+            .unwrap()
+            .info();
+        assert!(basic.from.is_empty());
     }
 
     #[test]

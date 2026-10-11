@@ -3,16 +3,19 @@
 //! view models to the UI.
 
 use crate::import::{self, run_import, BuildLookup, ImportReport, StepOutcome};
+use crate::overlay::{overlay_view, OverlayChoices, OverlayInputs};
 use crate::settings_store::{SettingsError, SettingsStore};
 use domain::builds::Build;
-use domain::champ_select::{selected_pick, ChampionPick};
-use domain::ports::{BuildSource, LcuEvent, LcuPort};
+use domain::champ_select::{selected_pick, ChampionPick, GameMode};
+use domain::ports::{BuildSource, LcuEvent, LcuPort, LiveSnapshot};
 use domain::session::{transition, SessionEvent, SessionState};
 use domain::settings::Settings;
+use domain::shopping::Purchases;
 use domain::static_catalog::StaticCatalog;
 use domain::summoner::Summoner;
 use ipc_types::{
-    ImportReportDto, RuneCatalogDto, RuneDto, RuneTreeDto, SessionStateDto, StatusDto, SummonerDto,
+    ImportReportDto, OverlayCommand, OverlayMessage, RuneCatalogDto, RuneDto, RuneTreeDto,
+    SessionStateDto, StatusDto, SummonerDto,
 };
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -22,6 +25,8 @@ use thiserror::Error;
 pub trait EventSink: Send + Sync + fmt::Debug {
     fn status(&self, status: &StatusDto);
     fn import(&self, report: &ImportReportDto);
+    /// The in-game item column's view; sent only when it changed.
+    fn overlay(&self, message: &OverlayMessage);
 }
 
 #[derive(Debug, Error)]
@@ -34,6 +39,8 @@ pub enum CoreError {
     StaticDataLoading,
     #[error("That rune page is no longer available")]
     NoSuchRunePage,
+    #[error("You picked another champion meanwhile")]
+    PickChanged,
     #[error(transparent)]
     Settings(#[from] SettingsError),
 }
@@ -45,6 +52,7 @@ impl CoreError {
             Self::NothingToImport => "nothing_to_import",
             Self::StaticDataLoading => "static_data_loading",
             Self::NoSuchRunePage => "no_such_rune_page",
+            Self::PickChanged => "pick_changed",
             Self::Settings(_) => "settings_io",
         }
     }
@@ -68,6 +76,42 @@ struct State {
     /// Index of the rune page of `build` that was last sent to the client.
     selected_rune_page: usize,
     last_report: Option<ImportReportDto>,
+    /// Items seen in the inventory during the current game.
+    purchases: Purchases,
+    /// What the player changed in the column this game.
+    choices: OverlayChoices,
+    /// Latest read of the running game, `None` outside one.
+    live: Option<LiveSnapshot>,
+    /// Last view sent to the overlay, to send only changes.
+    last_overlay: Option<OverlayMessage>,
+}
+
+impl State {
+    fn overlay_message(&self) -> OverlayMessage {
+        let (Some((pick, build)), Some(catalog)) = (&self.build, &self.catalog) else {
+            return OverlayMessage::Clear;
+        };
+        let role = match pick.mode {
+            GameMode::Aram => pick.role_label(),
+            GameMode::SummonersRift => build.role.label(),
+        };
+        OverlayMessage::Items(Box::new(overlay_view(OverlayInputs {
+            build,
+            champion_name: &catalog.champion_name(pick.champion_id),
+            role,
+            catalog,
+            purchases: &self.purchases,
+            choices: &self.choices,
+            live: self.live.as_ref(),
+        })))
+    }
+
+    /// A new game (or none): forget what was bought.
+    fn reset_game(&mut self) {
+        self.purchases = Purchases::default();
+        self.choices = OverlayChoices::default();
+        self.live = None;
+    }
 }
 
 #[derive(Debug)]
@@ -77,6 +121,9 @@ pub struct Core {
     sources: Vec<Arc<dyn BuildSource>>,
     settings_store: SettingsStore,
     sink: Arc<dyn EventSink>,
+    /// Held for a whole import. "Import again" runs beside the event loop,
+    /// and a slow import finishing after a newer one would undo it.
+    import_running: tokio::sync::Mutex<()>,
 }
 
 impl Core {
@@ -98,10 +145,15 @@ impl Core {
                 build: None,
                 selected_rune_page: 0,
                 last_report: None,
+                purchases: Purchases::default(),
+                choices: OverlayChoices::default(),
+                live: None,
+                last_overlay: None,
             }),
             sources,
             settings_store,
             sink,
+            import_running: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -181,6 +233,54 @@ impl Core {
         self.sink.status(&status);
     }
 
+    /// A game is running (the live game data is worth reading).
+    pub fn in_game(&self) -> bool {
+        self.lock().session == SessionState::InGame
+    }
+
+    /// The overlay's current view (sent to a freshly started overlay).
+    pub fn overlay(&self) -> OverlayMessage {
+        self.lock().overlay_message()
+    }
+
+    /// Recomputes the overlay view and sends it if it changed.
+    fn publish_overlay(&self) {
+        let changed = {
+            let mut s = self.lock();
+            let message = s.overlay_message();
+            (s.last_overlay.as_ref() != Some(&message)).then(|| {
+                s.last_overlay = Some(message.clone());
+                message
+            })
+        };
+        if let Some(message) = changed {
+            self.sink.overlay(&message);
+        }
+    }
+
+    /// Something the player did in the column (chose or removed an item).
+    pub fn overlay_command(&self, command: OverlayCommand) {
+        self.lock().choices.apply(command);
+        self.publish_overlay();
+    }
+
+    /// Feeds one read of the running game (`None`: no game data right now).
+    /// Call about once a second while in game.
+    pub fn live_tick(&self, snapshot: Option<LiveSnapshot>) {
+        {
+            let mut s = self.lock();
+            // A read that was under way when the game ended.
+            if s.session != SessionState::InGame {
+                return;
+            }
+            if let Some(snap) = &snapshot {
+                s.purchases.observe(&snap.inventory);
+            }
+            s.live = snapshot;
+        }
+        self.publish_overlay();
+    }
+
     /// Handles one LCU event. Call sequentially from a single task.
     pub async fn handle(&self, event: LcuEvent) {
         match event {
@@ -205,8 +305,10 @@ impl Core {
                     s.imported_for = None;
                     s.current_pick = None;
                     s.build = None;
+                    s.reset_game();
                 }
                 self.publish_status();
+                self.publish_overlay();
             }
             LcuEvent::Phase(phase) => {
                 let changed = {
@@ -216,10 +318,14 @@ impl Core {
                         s.imported_for = None;
                         s.current_pick = None;
                     }
+                    if next != SessionState::InGame {
+                        s.reset_game();
+                    }
                     std::mem::replace(&mut s.session, next) != next
                 };
                 if changed {
                     self.publish_status();
+                    self.publish_overlay();
                 }
             }
             LcuEvent::ChampSelect(None) => {}
@@ -278,7 +384,15 @@ impl Core {
         first_failure.map_or(BuildLookup::Missing, BuildLookup::Unavailable)
     }
 
+    fn is_current(&self, pick: ChampionPick) -> bool {
+        self.lock().current_pick == Some(pick)
+    }
+
     async fn import(&self, pick: ChampionPick) -> Result<ImportReportDto, CoreError> {
+        let _running = self.import_running.lock().await;
+        if !self.is_current(pick) {
+            return Err(CoreError::PickChanged);
+        }
         let (port, catalog, settings, summoner_id, previous_page) = {
             let mut s = self.lock();
             let port = s.port.clone().ok_or(CoreError::NotConnected)?;
@@ -295,6 +409,9 @@ impl Core {
             )
         };
         let lookup = self.lookup(pick, &catalog).await;
+        if !self.is_current(pick) {
+            return Err(CoreError::PickChanged);
+        }
         let rune_page = match &lookup {
             BuildLookup::Found(b) if previous_page < b.rune_pages.len() => previous_page,
             _ => 0,
@@ -319,8 +436,10 @@ impl Core {
             };
             s.selected_rune_page = rune_page;
             s.last_report = Some(dto.clone());
+            s.reset_game();
         }
         self.sink.import(&dto);
+        self.publish_overlay();
         Ok(dto)
     }
 

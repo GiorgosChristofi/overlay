@@ -72,7 +72,7 @@ async fn downloads_latest_patch_and_parses_it() {
         "non-numeric keys are skipped"
     );
     assert_eq!(
-        catalog.items.get(&1055).map(String::as_str),
+        catalog.items.get(&1055).map(|i| i.name.as_str()),
         Some("Doran's Blade")
     );
     assert_eq!(

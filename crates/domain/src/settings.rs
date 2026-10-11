@@ -13,6 +13,8 @@ pub struct Settings {
     pub replace_current_page_when_full: bool,
     pub start_with_windows: bool,
     pub start_minimized: bool,
+    /// Show the item column in game when P is pressed.
+    pub overlay_enabled: bool,
 }
 
 impl Default for Settings {
@@ -25,6 +27,7 @@ impl Default for Settings {
             replace_current_page_when_full: false,
             start_with_windows: false,
             start_minimized: false,
+            overlay_enabled: true,
         }
     }
 }

@@ -46,3 +46,20 @@ pub trait BuildSource: Send + Sync + fmt::Debug {
     /// this champion and mode; `Err` means it could not be asked.
     async fn build(&self, pick: ChampionPick) -> Result<Option<Build>, PortError>;
 }
+
+/// What the running game says about the local player (Riot's Live Client
+/// Data API, available only while a game is running).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LiveSnapshot {
+    /// Current gold, rounded down.
+    pub gold: u32,
+    /// Items held right now: item id and count.
+    pub inventory: Vec<(i64, u32)>,
+}
+
+/// Reads the running game.
+#[async_trait]
+pub trait LiveGamePort: Send + Sync + fmt::Debug {
+    /// `Ok(None)` while no game is running or it has not started yet.
+    async fn snapshot(&self) -> Result<Option<LiveSnapshot>, PortError>;
+}

@@ -92,7 +92,9 @@ async fn run() -> Result<(), String> {
     let pem = args.out.join("mock-root.pem");
     std::fs::write(&lockfile, mock.lockfile()).map_err(|e| e.to_string())?;
     std::fs::write(&pem, mock.root_pem()).map_err(|e| e.to_string())?;
-    let abs = |p: &PathBuf| std::fs::canonicalize(p).unwrap_or_else(|_| p.clone());
+    // Not `canonicalize`: on Windows it adds a `\\?\` prefix that is awkward
+    // to paste into an environment variable.
+    let abs = |p: &PathBuf| std::path::absolute(p).unwrap_or_else(|_| p.clone());
 
     eprintln!("mock-league running (127.0.0.1 only)");
     eprintln!("  client (LCU):  https://127.0.0.1:{}", mock.lcu_port());

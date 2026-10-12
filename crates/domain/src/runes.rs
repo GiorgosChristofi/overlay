@@ -158,17 +158,19 @@ pub fn plan_slot(
     {
         return SlotPlan::Replace(ours.id);
     }
-    if let Some(active) = editable.iter().find(|p| p.current) {
-        return SlotPlan::Replace(active.id);
-    }
     if (editable.len() as u64) < u64::from(owned_page_count) {
         return SlotPlan::Create;
     }
     if !replace_current_when_full {
         return SlotPlan::NoFreeSlot;
     }
+    // Import runs on hover, so the player's pages are only ever touched when
+    // they opted in; the active page goes first as it is the one they expect
+    // to change.
     editable
-        .first()
+        .iter()
+        .find(|p| p.current)
+        .or_else(|| editable.first())
         .map_or(SlotPlan::NoFreeSlot, |p| SlotPlan::Replace(p.id))
 }
 
@@ -271,26 +273,33 @@ mod tests {
     }
 
     #[test]
-    fn overwrites_active_page() {
+    fn creates_in_a_free_slot_instead_of_touching_the_active_page() {
         assert_eq!(
             plan_slot(&[page(1, "Mine", true)], 2, false),
-            SlotPlan::Replace(1)
+            SlotPlan::Create
         );
-    }
-
-    #[test]
-    fn creates_when_a_slot_is_free_and_none_active() {
         assert_eq!(
-            plan_slot(&[page(1, "Mine", false)], 2, false),
+            plan_slot(&[page(1, "Mine", true)], 2, true),
             SlotPlan::Create
         );
     }
 
     #[test]
-    fn respects_user_choice_when_full_and_none_active() {
+    fn never_replaces_the_players_page_when_full_unless_allowed() {
+        assert_eq!(
+            plan_slot(&[page(1, "Mine", true)], 1, false),
+            SlotPlan::NoFreeSlot
+        );
         let pages = [page(1, "Mine", false), page(2, "Other", false)];
         assert_eq!(plan_slot(&pages, 2, false), SlotPlan::NoFreeSlot);
-        assert_eq!(plan_slot(&pages, 2, true), SlotPlan::Replace(1));
+    }
+
+    #[test]
+    fn replaces_the_active_page_first_when_full_and_allowed() {
+        let pages = [page(1, "Mine", false), page(2, "Other", true)];
+        assert_eq!(plan_slot(&pages, 2, true), SlotPlan::Replace(2));
+        let none_active = [page(1, "Mine", false), page(2, "Other", false)];
+        assert_eq!(plan_slot(&none_active, 2, true), SlotPlan::Replace(1));
     }
 
     #[test]
@@ -321,6 +330,8 @@ mod tests {
             if let SlotPlan::Replace(id) = plan_slot(&pages, owned, replace) {
                 let p = pages.iter().find(|p| p.id == id).unwrap();
                 prop_assert!(p.is_editable && p.is_deletable);
+                // Without consent, only our own page may be replaced.
+                prop_assert!(replace || p.name.starts_with(PAGE_NAME_PREFIX));
             }
         }
     }

@@ -32,6 +32,9 @@ struct FakeLcu {
     calls: Mutex<Vec<String>>,
     item_sets: Mutex<Vec<ItemSet>>,
     fail_runes: bool,
+    /// The next `create_rune_page` answers "Max pages", as the client does
+    /// when its slot count disagrees with `owned_pages`.
+    max_pages_once: AtomicBool,
 }
 
 impl FakeLcu {
@@ -79,6 +82,13 @@ impl LcuPort for FakeLcu {
         Ok(())
     }
     async fn create_rune_page(&self, page: &NewRunePage) -> Result<(), PortError> {
+        if self.max_pages_once.swap(false, Ordering::SeqCst) {
+            self.log("create_page rejected".into());
+            return Err(PortError::Http {
+                status: 400,
+                body: r#"{"message":"Max pages reached"}"#.into(),
+            });
+        }
         self.log(format!(
             "create_page {} {:?}",
             page.name, page.selected_perk_ids
@@ -526,22 +536,29 @@ async fn full_page_slots_skip_runes_with_a_reason_and_still_do_the_rest() {
     assert!(!h.lcu.calls().iter().any(|c| c.starts_with("delete_page")));
 }
 
-#[tokio::test]
-async fn overwrites_active_page_when_one_page_exists() {
-    let pages = vec![ExistingPage {
+fn one_active_page() -> Mutex<Vec<ExistingPage>> {
+    Mutex::new(vec![ExistingPage {
         id: 1,
         name: "My page".into(),
         is_editable: true,
         is_deletable: true,
         current: true,
-    }];
+    }])
+}
+
+#[tokio::test]
+async fn overwrites_the_active_page_when_full_only_if_allowed() {
+    let allowed = Settings {
+        replace_current_page_when_full: true,
+        ..Settings::default()
+    };
     let h = harness(
         FakeLcu {
             owned_pages: 1,
-            pages: Mutex::new(pages),
+            pages: one_active_page(),
             ..Default::default()
         },
-        Settings::default(),
+        allowed,
     );
     h.connect_and_enter_champ_select().await;
     h.core
@@ -552,6 +569,71 @@ async fn overwrites_active_page_when_one_page_exists() {
     assert!(is_done(&r.runes), "{r:?}");
     assert_eq!(h.lcu.calls()[0], "delete_page 1");
     assert!(h.lcu.calls()[1].starts_with("create_page LoL Overlay: Lux"));
+}
+
+#[tokio::test]
+async fn hovering_never_deletes_the_players_active_page_by_default() {
+    let h = harness(
+        FakeLcu {
+            owned_pages: 2,
+            pages: one_active_page(),
+            ..Default::default()
+        },
+        Settings::default(),
+    );
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", false))))
+        .await;
+
+    assert!(is_done(&h.imports()[0].runes));
+    assert!(!h.lcu.calls().iter().any(|c| c.starts_with("delete_page")));
+}
+
+#[tokio::test]
+async fn max_pages_from_the_client_does_not_delete_without_consent() {
+    let lcu = FakeLcu {
+        owned_pages: 2,
+        pages: one_active_page(),
+        ..Default::default()
+    };
+    lcu.max_pages_once.store(true, Ordering::SeqCst);
+    let h = harness(lcu, Settings::default());
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
+        .await;
+
+    match &h.imports()[0].runes {
+        StepResultDto::Skipped { reason } => assert!(reason.contains("Settings")),
+        other => panic!("expected skipped, got {other:?}"),
+    }
+    assert!(!h.lcu.calls().iter().any(|c| c.starts_with("delete_page")));
+}
+
+#[tokio::test]
+async fn max_pages_from_the_client_replaces_the_active_page_when_allowed() {
+    let lcu = FakeLcu {
+        owned_pages: 2,
+        pages: one_active_page(),
+        ..Default::default()
+    };
+    lcu.max_pages_once.store(true, Ordering::SeqCst);
+    let allowed = Settings {
+        replace_current_page_when_full: true,
+        ..Settings::default()
+    };
+    let h = harness(lcu, allowed);
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
+        .await;
+
+    assert!(is_done(&h.imports()[0].runes));
+    let calls = h.lcu.calls();
+    assert_eq!(calls[0], "create_page rejected");
+    assert_eq!(calls[1], "delete_page 1");
+    assert!(calls[2].starts_with("create_page LoL Overlay: Lux"));
 }
 
 #[tokio::test]

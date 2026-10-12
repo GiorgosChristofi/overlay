@@ -1,0 +1,14 @@
+{
+  "name": "All rune page slots used",
+  "description": "The player owns one page slot and uses it. With default settings the import must skip runes and leave the page alone.",
+  "setup": { "ownedPageCount": 1 },
+  "steps": [
+    { "phase": "ChampSelect" },
+    { "champSelect": { "champion": 99, "position": "middle" } },
+    { "wait": 4000 },
+    { "champSelect": { "champion": 99, "position": "middle", "locked": true } },
+    { "wait": 2000 },
+    { "endChampSelect": null },
+    { "phase": "None" }
+  ]
+}

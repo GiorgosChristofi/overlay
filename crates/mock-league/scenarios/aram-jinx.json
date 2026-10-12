@@ -1,0 +1,15 @@
+{
+  "name": "ARAM Jinx",
+  "description": "ARAM: the champion is assigned (no pick actions), then a short game.",
+  "steps": [
+    { "phase": "ChampSelect" },
+    { "champSelect": { "champion": 222, "aram": true, "spells": [32, 4] } },
+    { "wait": 4000 },
+    { "endChampSelect": null },
+    { "phase": "InProgress" },
+    { "live": { "gold": 1400, "championName": "Jinx", "gameMode": "ARAM" } },
+    { "wait": 8000 },
+    { "phase": "EndOfGame" },
+    { "noGame": null }
+  ]
+}

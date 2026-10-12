@@ -210,11 +210,15 @@ fn spawn_live_game(core: Arc<Core>, riot_root_pem: Option<&[u8]>, cancel: Cancel
 
 fn spawn_lcu(core: Arc<Core>, riot_root_pem: Option<Vec<u8>>, cancel: CancellationToken) {
     let (tx, mut rx) = tokio::sync::mpsc::channel(64);
-    tauri::async_runtime::spawn(run_connector(
-        ConnectorConfig::new(riot_root_pem),
-        tx,
-        cancel,
-    ));
+    let mut config = ConnectorConfig::new(riot_root_pem);
+    if let Some(path) = paths::mock_lockfile() {
+        tracing::warn!(path = %path.display(), "using a mock League client lockfile");
+        config.discover = Arc::new(move || {
+            let raw = std::fs::read_to_string(&path).ok()?;
+            lcu_client::LockfileInfo::parse(&raw).ok()
+        });
+    }
+    tauri::async_runtime::spawn(run_connector(config, tx, cancel));
     tauri::async_runtime::spawn(async move {
         // One consumer, so events are handled strictly in order.
         while let Some(event) = rx.recv().await {

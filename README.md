@@ -50,6 +50,7 @@ crates/static-data   Data Dragon download + per-patch disk cache
 crates/opgg          OP.GG champion statistics -> builds (runes, spells, items)
 crates/app-core      session service and champ-select import
 crates/ipc-types     DTOs shared with React; generates ui/src/bindings
+crates/mock-league   fake League client + game for end-to-end tests and manual runs
 apps/desktop         Tauri shell: window, tray, commands
 apps/overlay         in-game item column (egui), run as `desktop --overlay`
 ui/                  React + TypeScript (Vite)
@@ -79,6 +80,27 @@ with in-memory fakes.
 `crates/lcu-client/tests/support` is a fake League client: REST and the WAMP
 socket on one port, as the real client does. It covers subscribing, event
 mapping, client restarts, starting mid champ select, and booting clients.
+
+### Playing a game without League
+
+`crates/mock-league` fakes the League client (HTTPS, WAMP events, password,
+rune page limit, item sets) and the game's Live Client Data API, with
+certificates from a throwaway root. `cargo test -p mock-league` runs the app's
+core, connector and live reader against it: a whole game, an impostor client,
+full rune pages, client restarts, ARAM, and a check that the app only calls
+the endpoints it needs.
+
+To watch the real app play a scripted game:
+
+```
+cargo run -p mock-league -- --scenario crates/mock-league/scenarios/ranked-mid-lux.json
+# in another terminal, with the two paths it prints:
+LOL_OVERLAY_LCU_LOCKFILE=... LOL_OVERLAY_RIOT_PEM=... cargo run -p desktop
+```
+
+The overrides only work in debug builds. While it runs, `curl -d
+'{"phase":"InProgress"}' <control url>/step` applies a step and
+`<control url>/state` shows what the app did.
 
 ## Where builds come from
 

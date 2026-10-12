@@ -134,3 +134,59 @@ async fn offline_with_empty_cache_is_a_clear_error() {
         Err(static_data::StaticDataError::NothingAvailable)
     ));
 }
+
+#[tokio::test]
+async fn a_hostile_version_never_writes_outside_the_cache() {
+    // Every other path answers valid JSON: the client normalises `..` in the
+    // URL, so the download itself succeeds and only the version check can
+    // stop the write.
+    let app = Router::new()
+        .route(
+            "/api/versions.json",
+            get(|| async { r#"["../../escaped"]"# }),
+        )
+        .fallback(get(|| async { r#"{"type":"champion","data":{}}"# }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let root = tempfile::tempdir().unwrap();
+    let cache = root.path().join("a").join("cache");
+    let result = DataDragon::new(url, &cache, "en_US").unwrap().load().await;
+
+    assert!(result.is_err());
+    assert!(!root.path().join("escaped").exists());
+    assert!(!root.path().join("a").join("escaped").exists());
+}
+
+#[tokio::test]
+async fn an_oversized_download_is_rejected_and_not_cached() {
+    let app = Router::new()
+        .route("/api/versions.json", get(|| async { r#"["16.19.1"]"# }))
+        .route(
+            "/cdn/{*rest}",
+            get(|| async { "x".repeat(33 * 1024 * 1024) }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let cache = tempfile::tempdir().unwrap();
+    let result = DataDragon::new(url, cache.path(), "en_US")
+        .unwrap()
+        .load_version("16.19.1")
+        .await;
+
+    match result {
+        Err(static_data::StaticDataError::Invalid { reason, .. }) => {
+            assert!(reason.contains("larger than"), "{reason}");
+        }
+        other => panic!("expected an invalid-data error, got {other:?}"),
+    }
+    assert!(!cache
+        .path()
+        .join("16.19.1")
+        .join("en_US")
+        .join("champion.json")
+        .exists());
+}

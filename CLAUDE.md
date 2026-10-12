@@ -97,7 +97,17 @@ Unknown endpoints answer 404 and are recorded as `known: false`.
   the user reports real-game behaviour that differs, fix the mock too.
 
 ## Trying the overlay without a game
-- `cargo build -p desktop`, then pipe a JSON line into it:
+- Whole path (preferred; later overlay parts use the same pipeline):
+  `scripts/dev/install-mesa.ps1` once, Vite on 5173, `mock-league.exe
+  --control-port 47999`, then `desktop.exe` with the two mock env vars plus
+  `GALLIUM_DRIVER=llvmpipe LOL_OVERLAY_ANY_WINDOW=1`. POST steps to
+  `/steps` up to `{"phase":"InProgress"}` and a `live` step: the strip
+  appears. Ending champ select sends `Clear`, which collapses the column
+  even with `LOL_OVERLAY_OPEN`; open it like a player by clicking the
+  strip (`scripts/dev/click.ps1 -X -Y`, VM only) and capture it with
+  `scripts/dev/screenshot-window.ps1 -Title "LoL Overlay items" -Out x.png`
+  (that window's rect only). New `live` steps update it within a second.
+- Just the overlay process: `cargo build -p desktop`, then pipe a JSON line into it:
   `(cat view.jsonl; ping -n 15 127.0.0.1 >/dev/null) | LOL_OVERLAY_OPEN=1 LOL_OVERLAY_ANY_WINDOW=1 ./target/debug/desktop.exe --overlay`
   (`OPEN` starts expanded; `ANY_WINDOW` treats any focused window as the
   game). Without `OPEN` it shows the compact strip (needs `gold` set).
@@ -118,11 +128,14 @@ Unknown endpoints answer 404 and are recorded as `known: false`.
   on `x86_64-pc-windows-msvc`). `gh` is not installed; push with git.
 - Git Bash may not have `~/.cargo/bin` or Node on `PATH` in an old shell:
   `export PATH="$HOME/.cargo/bin:/c/Program Files/nodejs:$PATH"`.
-- The VM's display adapter has no OpenGL 2.0, so the egui overlay
-  (`--overlay`) cannot open here ("egui_glow requires opengl 2.0+").
-  Test overlay logic with `cargo test -p overlay` and `app-core` tests; the
-  main Tauri window works. Debug builds load the UI from `npm run dev`
-  (port 5173), so start Vite before `desktop.exe`.
+- The VM's display adapter ("Microsoft Basic Display Adapter") has only
+  OpenGL 1.1, so the egui overlay fails with "egui_glow requires opengl
+  2.0+" until `scripts/dev/install-mesa.ps1` puts Mesa's software OpenGL
+  (llvmpipe, pinned SHA-256) next to `target/debug/desktop.exe`. Rerun it
+  after `cargo clean`. Start the app with `GALLIUM_DRIVER=llvmpipe`. Dev
+  only: the DLLs live in `target/` and are never bundled.
+- Debug builds load the UI from `npm run dev` (port 5173), so start Vite
+  before `desktop.exe`.
 - No Python (the `python3` on PATH is the Microsoft Store stub). Use node
   or PowerShell for scripts. The VM has one CPU: the first full build is slow.
 - `apps/desktop/resources/riotgames.pem` is not committed; run
@@ -171,7 +184,7 @@ Unknown endpoints answer 404 and are recorded as `known: false`.
   `apps/desktop/src/lib.rs` and `crates/opgg/src/lib.rs`).
 - `OverlayHost::send` respawns a crashed overlay on every view update with
   no backoff; on a PC where it cannot start (no OpenGL) that is a new
-  process about once a second in game. Seen against `mock-league` on the VM.
+  process about once a second in game. Seen on the VM before Mesa.
 - Known limits: typing "p" in chat toggles the column; items sold back
   still count as bought.
 - `docs/adr/Changes_todo.md` (runes on hover) is done but left untouched.

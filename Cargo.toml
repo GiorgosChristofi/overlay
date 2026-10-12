@@ -39,7 +39,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 tokio-util = "0.7"
 tracing = "0.1"
-ts-rs = { version = "10", features = ["serde-compat"] }
+ts-rs = { version = "12", features = ["serde-compat"] }
 
 # dev and the mock-league test harness
 proptest = "1"

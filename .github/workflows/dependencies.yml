@@ -1,0 +1,49 @@
+name: Dependencies
+
+# Flags dependencies to worry about. Rust crates are checked by cargo-deny in
+# ci.yml (RustSec advisories, yanked crates, licences, sources); this covers
+# what that does not: the UI's npm packages, and what a pull request adds.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "30 4 * * *" # nightly: advisories are published after we lock
+  workflow_dispatch: # "Run workflow" button in the Actions tab
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: New dependencies in this pull request
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # Compares the lockfiles (Cargo.lock, ui/package-lock.json) and workflow
+      # actions against the base branch and fails on any added dependency
+      # with a known vulnerability, of any severity.
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: low
+          show-openssf-scorecard: true
+
+  npm:
+    name: UI packages (npm audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      # --ignore-scripts: nothing from the registry runs before it is checked.
+      - run: npm ci --ignore-scripts
+      # Known vulnerabilities in any package, dev tooling included.
+      - run: npm audit --audit-level=low
+      # Every package matches the registry's signature, and any provenance
+      # attestation checks out: catches tampered or republished tarballs.
+      - run: npm audit signatures

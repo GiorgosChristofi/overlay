@@ -1,0 +1,31 @@
+# Weekly update pull requests, grouped per ecosystem to keep the noise down.
+# Security fixes come as their own pull requests as soon as an advisory is
+# published (needs "Dependabot security updates" on in the repo settings).
+# Dependabot also bumps the SHA-pinned actions and keeps the tag comments.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      rust:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
+    groups:
+      ui:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

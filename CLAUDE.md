@@ -72,6 +72,10 @@ traps in this Windows dev environment.
 - Toolchain pinned to Rust 1.99.0 (`rust-toolchain.toml` and CI). egui and
   eframe 0.36 need >= 1.95. `cargo-deny` is not installed locally (CI runs
   it); `deny.toml` limits targets and excepts egui's font licences.
+- Dependency watch on GitHub: cargo-deny (`ci.yml`), `npm audit` +
+  `npm audit signatures` and PR dependency review (`dependencies.yml`),
+  nightly and on every PR; Dependabot (`.github/dependabot.yml`) opens
+  weekly grouped updates, including for the SHA-pinned actions.
 
 ## Simulating League (`crates/mock-league`)
 This VM has no League client or game. `mock-league` fakes both on

@@ -200,47 +200,46 @@ async fn import_runes(
         Ok(n) => n,
         Err(e) => return StepOutcome::Failed(format!("Could not read rune page slots: {e}")),
     };
-    match runes::plan_slot(&pages, owned, replace_current) {
-        SlotPlan::NoFreeSlot => {
-            return StepOutcome::Skipped(
-                "All rune page slots are in use. Allow replacing the current page in Settings."
-                    .into(),
-            )
-        }
-        SlotPlan::Replace(id) => {
-            if let Err(e) = port.delete_rune_page(id).await {
-                return StepOutcome::Failed(format!("Could not free a rune page slot: {e}"));
-            }
-        }
-        SlotPlan::Create => {}
+    if let Some(outcome) = free_slot(port, runes::plan_slot(&pages, owned, replace_current)).await {
+        return outcome;
     }
     let page = NewRunePage::from_selection(champion, &option.runes);
+    let done = || StepOutcome::Done(format!("Rune page \u{201c}{}\u{201d} is active", page.name));
     match port.create_rune_page(&page).await {
-        Ok(()) => StepOutcome::Done(format!("Rune page \u{201c}{}\u{201d} is active", page.name)),
-        Err(e) => {
-            if e.to_string().contains("Max pages") {
-                if let Some(to_replace) = pages
-                    .iter()
-                    .find(|p| p.is_editable && p.is_deletable && p.current)
-                    .or_else(|| pages.iter().find(|p| p.is_editable && p.is_deletable))
-                {
-                    tracing::warn!(
-                        id = to_replace.id,
-                        name = %to_replace.name,
-                        "Max pages reached; deleting page to retry creation"
-                    );
-                    if port.delete_rune_page(to_replace.id).await.is_ok() {
-                        if let Ok(()) = port.create_rune_page(&page).await {
-                            return StepOutcome::Done(format!(
-                                "Rune page \u{201c}{}\u{201d} is active",
-                                page.name
-                            ));
-                        }
-                    }
-                }
+        Ok(()) => done(),
+        Err(e) if e.to_string().contains("Max pages") => {
+            // The client counted fewer free slots than `owned` suggested. Plan
+            // again as if full, so the player's consent setting still applies.
+            let pages = match port.rune_pages().await {
+                Ok(p) => p,
+                Err(e) => return StepOutcome::Failed(format!("Could not read rune pages: {e}")),
+            };
+            let plan = runes::plan_slot(&pages, 0, replace_current);
+            tracing::warn!(?plan, "Max pages reached; planning again as full");
+            if let Some(outcome) = free_slot(port, plan).await {
+                return outcome;
             }
-            StepOutcome::Failed(format!("The client rejected the rune page: {e}"))
+            match port.create_rune_page(&page).await {
+                Ok(()) => done(),
+                Err(e) => StepOutcome::Failed(format!("The client rejected the rune page: {e}")),
+            }
         }
+        Err(e) => StepOutcome::Failed(format!("The client rejected the rune page: {e}")),
+    }
+}
+
+/// Carries out a slot plan. Returns an outcome when the import has to stop.
+async fn free_slot(port: &dyn LcuPort, plan: SlotPlan) -> Option<StepOutcome> {
+    match plan {
+        SlotPlan::NoFreeSlot => Some(StepOutcome::Skipped(
+            "All rune page slots are in use. Allow replacing the current page in Settings.".into(),
+        )),
+        SlotPlan::Replace(id) => port
+            .delete_rune_page(id)
+            .await
+            .err()
+            .map(|e| StepOutcome::Failed(format!("Could not free a rune page slot: {e}"))),
+        SlotPlan::Create => None,
     }
 }
 

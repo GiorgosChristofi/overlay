@@ -50,6 +50,7 @@ impl OpggClient {
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
             .user_agent(concat!("lol-overlay/", env!("CARGO_PKG_VERSION")))
+            .redirect(same_host_redirects())
             .build()
             .map_err(|e| PortError::Transport(e.to_string()))?;
         Ok(Self {
@@ -94,10 +95,9 @@ impl OpggClient {
             tracing::info!(%url, %status, "OP.GG has no data");
             return Ok(None);
         }
-        let body = response
-            .text()
+        let body = read_capped(response, MAX_BODY_BYTES)
             .await
-            .map_err(|e| PortError::Transport(e.to_string()))?;
+            .map_err(PortError::Transport)?;
         if !status.is_success() {
             return Err(PortError::Http {
                 status: status.as_u16(),
@@ -196,4 +196,35 @@ impl BuildSource for OpggClient {
         self.remember(key, build.clone());
         Ok(build)
     }
+}
+
+/// OP.GG champion pages are a few hundred KB; this bounds a misbehaving server.
+const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
+
+/// Follows redirects only within the host we asked, so a redirect cannot
+/// send us to builds from somewhere else.
+fn same_host_redirects() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        let same_host = attempt
+            .previous()
+            .first()
+            .is_some_and(|first| first.host_str() == attempt.url().host_str());
+        if same_host && attempt.previous().len() < 5 {
+            attempt.follow()
+        } else {
+            attempt.stop()
+        }
+    })
+}
+
+/// Reads a body as UTF-8 text, giving up once it passes `max` bytes.
+async fn read_capped(mut response: reqwest::Response, max: usize) -> Result<String, String> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+        if body.len() + chunk.len() > max {
+            return Err(format!("response is larger than {max} bytes"));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    String::from_utf8(body).map_err(|e| e.to_string())
 }

@@ -176,3 +176,63 @@ async fn repeated_picks_are_served_from_cache() {
     assert_eq!(first, second);
     assert_eq!(requests.lock().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn redirects_to_another_host_are_not_followed() {
+    let hits = Arc::new(Mutex::new(Vec::new()));
+    let log = hits.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let app = Router::new().fallback(get(move |uri: Uri| {
+        let log = log.clone();
+        async move {
+            log.lock().unwrap().push(uri.path().to_string());
+            if uri.path().starts_with("/elsewhere") {
+                return (
+                    StatusCode::OK,
+                    [("location", String::new())],
+                    LUX_MID.to_string(),
+                );
+            }
+            // Same server, but named `localhost`: a different host to the client.
+            let to = format!("http://localhost:{port}/elsewhere");
+            (StatusCode::FOUND, [("location", to)], String::new())
+        }
+    }));
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let client = OpggClient::new(format!("http://127.0.0.1:{port}"), "EUNE").unwrap();
+    let err = client
+        .build(pick(99, Role::Middle, GameMode::SummonersRift))
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, PortError::Http { status: 302, .. }),
+        "{err:?}"
+    );
+    assert!(!hits
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|p| p.starts_with("/elsewhere")));
+}
+
+#[tokio::test]
+async fn an_oversized_response_is_an_error_not_a_build() {
+    let app = Router::new().fallback(get(|| async { "x".repeat(9 * 1024 * 1024) }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let err = OpggClient::new(url, "EUNE")
+        .unwrap()
+        .build(pick(99, Role::Middle, GameMode::SummonersRift))
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(&err, PortError::Transport(m) if m.contains("larger than")),
+        "{err:?}"
+    );
+}

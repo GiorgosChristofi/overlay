@@ -5,7 +5,8 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    - cron: "0 4 * * *" # nightly: live Data Dragon check
+    - cron: "0 4 * * *" # nightly: live Data Dragon check, new advisories
+  workflow_dispatch:
 
 # Third-party actions are pinned to commit SHAs (tag in the comment) so a
 # moved tag cannot change what runs. No job needs to write to the repo.

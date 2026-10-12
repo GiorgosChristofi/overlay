@@ -1,10 +1,12 @@
 # cargo-deny: licences, security advisories, duplicate and unknown sources.
 [graph]
 all-features = false
-# The targets we ship and test on. Without this, cargo-deny also checks
-# dependencies of platforms we never build (e.g. active-win-pos-rs pulls a
-# GPL crate on Linux, but we only use it on Windows).
-targets = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"]
+# The only target we ship. cargo-deny filters each dependency edge against
+# all listed targets, not the whole path, so listing Linux too dragged in
+# Linux-only deps of Windows-only crates (active-win-pos-rs -> hyprland, GPL)
+# and Tauri's GTK stack (proc-macro-error, unmaintained). Linux CI only runs
+# the tests of the core crates; we never build or ship for it.
+targets = ["x86_64-pc-windows-msvc"]
 
 [advisories]
 version = 2
@@ -25,6 +27,9 @@ exceptions = [
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Our own crates are path dependencies without a version; every one is
+# `publish = false`, which this setting requires.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"

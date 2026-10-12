@@ -1,0 +1,15 @@
+{
+  "name": "Client restarts during champ select",
+  "description": "The client drops its connections mid champ select; the app must reconnect and pick up the session.",
+  "steps": [
+    { "phase": "ChampSelect" },
+    { "champSelect": { "champion": 99, "position": "middle" } },
+    { "wait": 2000 },
+    { "dropConnections": null },
+    { "wait": 4000 },
+    { "champSelect": { "champion": 99, "position": "middle", "locked": true } },
+    { "wait": 2000 },
+    { "endChampSelect": null },
+    { "phase": "None" }
+  ]
+}

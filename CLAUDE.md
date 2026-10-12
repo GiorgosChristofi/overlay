@@ -4,6 +4,25 @@ Read README.md first (product, layout, commands, OP.GG and overlay docs).
 This file is what the README doesn't say: how things fit, conventions, and
 traps in this Windows dev environment.
 
+## Workflow (required, from the user)
+- Never commit to `main`. Work on a feature branch (`feat/...`, `fix/...`)
+  and push that branch to `origin` (SSH deploy key, already set up). The
+  user reviews and merges.
+- Every change is tested two ways before it is pushed, and the summary says
+  how:
+  1. **It works:** unit tests for the logic, plus a `mock-league` end-to-end
+     test (`crates/mock-league/tests/end_to_end.rs`) when the change touches
+     the client, the game or the import/overlay flow. Run the real app
+     against the mock (below) when the change is visible in the UI or overlay.
+  2. **It is safe:** tests for the security properties the change touches
+     (TLS trust, `riot:<token>` auth, only expected LCU writes, never deleting
+     the player's data without consent, bounds on untrusted input, paths
+     built from remote data). New dependencies: crates.io / npmjs only,
+     checked against OSV (`api.osv.dev/v1/querybatch`, max 1000 per call)
+     since `cargo-deny` and `cargo-audit` are not installed.
+- Then `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`,
+  `cargo test --workspace`, and the UI checks if `ui/` changed.
+
 ## Shape of the code
 - `domain` is pure (no I/O). Ports in `crates/domain/src/ports.rs`:
   `LcuPort` (League client), `BuildSource` (OP.GG, seed), `LiveGamePort`
@@ -54,6 +73,29 @@ traps in this Windows dev environment.
   eframe 0.36 need >= 1.95. `cargo-deny` is not installed locally (CI runs
   it); `deny.toml` limits targets and excepts egui's font licences.
 
+## Simulating League (`crates/mock-league`)
+This VM has no League client or game. `mock-league` fakes both on
+127.0.0.1: the LCU (HTTPS + WAMP WebSocket, `riot:<token>` auth, rune page
+limit, deletable pages, item sets per summoner) and the Live Client Data API
+(HTTPS, 404 while no game). Its certificates come from a throwaway root, so
+the app's real TLS path (trust one root, tolerate the host name) runs.
+Unknown endpoints answer 404 and are recorded as `known: false`.
+- In tests: `MockLeague::start(Options { setup, .. })`, drive it with
+  `Step`s (`phase`, `champSelect` hover/lock/ARAM, `live` gold/items,
+  `noGame`, `dropConnections`, `wait`), read `snapshot()` (rune pages, item
+  sets, spells, every request). `tests/end_to_end.rs` shows the wiring.
+- The real app: `cargo run -p mock-league -- --scenario
+  crates/mock-league/scenarios/ranked-mid-lux.json` (binds 2999 for the
+  game, writes `target/mock-league/{lockfile,mock-root.pem,state.json}`),
+  then start a **debug** `desktop.exe` with `LOL_OVERLAY_LCU_LOCKFILE` and
+  `LOL_OVERLAY_RIOT_PEM` set to the printed paths. Both env vars are ignored
+  in release builds. Drive it live with
+  `curl -d '{"phase":"InProgress"}' <control>/step`, `GET <control>/state`.
+- Scenarios are JSON (`crates/mock-league/scenarios/`); every one is played
+  by the `bundled_scenarios_play_through_cleanly` test.
+- The mock follows documented/community LCU shapes, not recordings. When
+  the user reports real-game behaviour that differs, fix the mock too.
+
 ## Trying the overlay without a game
 - `cargo build -p desktop`, then pipe a JSON line into it:
   `(cat view.jsonl; ping -n 15 127.0.0.1 >/dev/null) | LOL_OVERLAY_OPEN=1 LOL_OVERLAY_ANY_WINDOW=1 ./target/debug/desktop.exe --overlay`
@@ -70,7 +112,21 @@ traps in this Windows dev environment.
 - UI demo without Tauri: `cd ui && npm run dev`, then
   `?state=champSelect&page=N`.
 
+## Dev environment (this VM)
+- Installed with winget: Rustup (toolchain from `rust-toolchain.toml`),
+  Node.js LTS, Visual Studio 2022 Build Tools (C++ workload, needed to link
+  on `x86_64-pc-windows-msvc`). `gh` is not installed; push with git.
+- Git Bash may not have `~/.cargo/bin` or Node on `PATH` in an old shell:
+  `export PATH="$HOME/.cargo/bin:/c/Program Files/nodejs:$PATH"`.
+- No Python (the `python3` on PATH is the Microsoft Store stub). Use node
+  or PowerShell for scripts. The VM has one CPU: the first full build is slow.
+- `apps/desktop/resources/riotgames.pem` is not committed; run
+  `scripts/fetch-riot-cert.sh` (checks a pinned SHA-256).
+
 ## Environment traps (Windows, Git Bash)
+- Don't write `perl -e 's{..}{..}'` edits on Rust code (braces clash) or
+  `cmd > tmp && cp tmp file` pipelines (an empty `tmp` wipes the file);
+  use the Edit tool.
 - Inline `python - <<'EOF'` heredocs sometimes break when the script
   contains an apostrophe; write the script to the scratchpad and run it.
 - `cargo fmt` rewrites files; re-read before string-matching edits.
@@ -99,7 +155,8 @@ traps in this Windows dev environment.
 ## Not verified yet
 - No agent has run anything against a real League client or game; the user
   tests in real games. LCU paths and Live Client payloads come from docs and
-  synthetic fixtures (`fixtures/synthetic/`).
+  synthetic fixtures (`fixtures/synthetic/`); `mock-league` is built from
+  the same sources, so it proves the wiring, not Riot's exact payloads.
 
 ## Open threads (offered, not done)
 - Live polling: switch from `allgamedata` (grows with events) to

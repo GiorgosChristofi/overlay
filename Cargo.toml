@@ -21,6 +21,7 @@ opgg = { path = "crates/opgg" }
 static-data = { path = "crates/static-data" }
 app-core = { path = "crates/app-core" }
 ipc-types = { path = "crates/ipc-types" }
+mock-league = { path = "crates/mock-league" }
 
 # external
 anyhow = "1"
@@ -40,10 +41,14 @@ tokio-util = "0.7"
 tracing = "0.1"
 ts-rs = { version = "10", features = ["serde-compat"] }
 
-# dev
+# dev and the mock-league test harness
 proptest = "1"
 tempfile = "3"
 axum = { version = "0.8", features = ["ws"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "service"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -41,9 +41,25 @@ pub fn init_logging(dir: &std::path::Path) -> std::io::Result<WorkerGuard> {
     Ok(guard)
 }
 
-/// Riot root certificate: env override first, then the bundled resource.
+/// Env var naming a lockfile to connect to instead of discovering League,
+/// for `mock-league`. Debug builds only, like [`RIOT_PEM_ENV`].
+const MOCK_LOCKFILE_ENV: &str = "LOL_OVERLAY_LCU_LOCKFILE";
+
+pub fn mock_lockfile() -> Option<PathBuf> {
+    cfg!(debug_assertions)
+        .then(|| std::env::var_os(MOCK_LOCKFILE_ENV))
+        .flatten()
+        .map(PathBuf::from)
+}
+
+/// Riot root certificate: env override first (debug builds only), then the
+/// bundled resource.
 pub fn riot_root_pem(app: &AppHandle) -> Option<Vec<u8>> {
-    let candidates = std::env::var_os(RIOT_PEM_ENV)
+    // In a release build the override would let anyone who can set the
+    // user's environment choose which certificate the client is trusted by.
+    let candidates = cfg!(debug_assertions)
+        .then(|| std::env::var_os(RIOT_PEM_ENV))
+        .flatten()
         .map(PathBuf::from)
         .into_iter()
         .chain(

@@ -14,7 +14,7 @@ Build a rustls config whose only trust anchor is `riotgames.pem`. Verify the
 full chain and signatures; accept a `NotValidForName` error only. Connect
 only to `127.0.0.1`. The certificate is fetched at build time
 (`scripts/fetch-riot-cert.*`) and bundled as a resource, or pointed to with
-`LOL_OVERLAY_RIOT_PEM` in development.
+`LOL_OVERLAY_RIOT_PEM` in development (honoured by debug builds only).
 
 ## Consequences
 

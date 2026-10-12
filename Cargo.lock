@@ -3131,7 +3131,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "domain",
  "futures-util",
  "reqwest 0.12.28",
@@ -3387,7 +3387,7 @@ version = "0.1.0"
 dependencies = [
  "app-core",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "domain",
  "hyper",
  "hyper-util",

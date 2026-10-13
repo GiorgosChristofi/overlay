@@ -20,7 +20,7 @@ or registered trademarks of Riot Games, Inc.
 ## Getting started
 
 Prerequisites: Windows 10/11 (WebView2 is preinstalled), [rustup](https://rustup.rs)
-(the toolchain in `rust-toolchain.toml` installs itself), Node.js 22, and the
+(the toolchain in `rust-toolchain.toml` installs itself), Node.js 24, and the
 Tauri CLI: `cargo install tauri-cli --version "^2" --locked`.
 
 ```powershell

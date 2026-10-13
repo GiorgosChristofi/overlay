@@ -1,6 +1,11 @@
 # Weekly update pull requests, grouped per ecosystem to keep the noise down.
+# Major (breaking) Cargo and npm updates are not proposed: they often need
+# code changes, so they are done by hand when wanted.
 # Security fixes come as their own pull requests as soon as an advisory is
 # published (needs "Dependabot security updates" on in the repo settings).
+# `ignore` applies to those too, so a fix that exists only in a new major
+# version gets no pull request; the alert and the nightly cargo-deny and
+# npm audit jobs still flag it.
 # Dependabot also bumps the SHA-pinned actions and keeps the tag comments.
 version: 2
 updates:
@@ -12,6 +17,9 @@ updates:
       rust:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /ui
@@ -21,6 +29,9 @@ updates:
       ui:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /

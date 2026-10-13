@@ -11,6 +11,33 @@ body,
   margin: 0;
 }
 
+/* Scrollbars: no track or arrows, only the thumb showing where you are.
+   WebView2 is Chromium; the standard scrollbar-color would switch these
+   rules off there, so only the -webkit- ones are set. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background: transparent;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -56,12 +83,33 @@ p {
   height: 100%;
 }
 
+.shell[data-rail="collapsed"] {
+  grid-template-columns: 60px 1fr;
+}
+
 .rail {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
   padding: var(--space-5) var(--space-4);
   border-right: 1px solid var(--line);
+  min-width: 0;
+}
+
+.shell[data-rail="collapsed"] .rail {
+  padding-inline: var(--space-2);
+  align-items: center;
+}
+
+/* Collapsed, labels leave the screen but stay readable to screen readers;
+   hovering an icon shows its name (title). */
+.shell[data-rail="collapsed"] .rail-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .rail-brand {
@@ -74,9 +122,48 @@ p {
 }
 
 .rail-mark {
+  flex: none;
   width: 28px;
   height: 28px;
   color: var(--accent);
+}
+
+.rail-toggle {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: calc(-1 * var(--space-3)) 0 0 auto;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.shell[data-rail="collapsed"] .rail-toggle {
+  margin: calc(-1 * var(--space-3)) 0 0;
+}
+
+.rail-toggle:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+
+.rail-toggle svg,
+.rail-icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rail-icon {
+  flex: none;
 }
 
 .rail-links {
@@ -88,6 +175,9 @@ p {
 }
 
 .rail-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   width: 100%;
   text-align: left;
   padding: var(--space-2) var(--space-3);
@@ -305,12 +395,6 @@ p {
 
 .glyph[data-status="failed"] {
   background: var(--bad);
-}
-
-.import-source {
-  margin-top: var(--space-1);
-  color: var(--muted);
-  font-size: var(--step--1);
 }
 
 /* ---------- rune pages ---------- */
@@ -741,6 +825,23 @@ p {
   }
   .rail-links {
     grid-auto-flow: column;
+  }
+  /* The narrow layout is already a single top bar: always show the labels. */
+  .shell[data-rail="collapsed"] {
+    grid-template-columns: 1fr;
+  }
+  .shell[data-rail="collapsed"] .rail {
+    padding-inline: var(--space-4);
+  }
+  .shell[data-rail="collapsed"] .rail-text {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+  }
+  .rail-toggle,
+  .rail-icon {
+    display: none;
   }
   .rail-connection {
     margin: 0 0 0 auto;

@@ -47,6 +47,53 @@ describe("App", () => {
     expect(fake.listenerCount()).toBe(0);
   });
 
+  describe("menu", () => {
+    beforeEach(() => localStorage.clear());
+
+    const shell = () => document.querySelector(".shell");
+    const toggle = (name: string) => screen.getByRole("button", { name });
+
+    it("starts collapsed, with the pages still reachable by name", async () => {
+      const { backend } = fakeBackend();
+      renderWith(backend, <App />);
+      expect(toggle("Expand menu")).toHaveAttribute("aria-expanded", "false");
+      expect(shell()).toHaveAttribute("data-rail", "collapsed");
+      expect(screen.getByRole("button", { name: "Settings" })).toHaveAttribute("title", "Settings");
+      await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+      expect(screen.getByRole("button", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+    });
+
+    it("expands and collapses, and remembers the choice", async () => {
+      const { backend } = fakeBackend();
+      const { unmount } = renderWith(backend, <App />);
+      await userEvent.click(toggle("Expand menu"));
+      expect(toggle("Collapse menu")).toHaveAttribute("aria-expanded", "true");
+      expect(shell()).toHaveAttribute("data-rail", "expanded");
+      unmount();
+
+      renderWith(backend, <App />);
+      expect(shell()).toHaveAttribute("data-rail", "expanded");
+      await userEvent.click(toggle("Collapse menu"));
+      expect(shell()).toHaveAttribute("data-rail", "collapsed");
+    });
+
+    it("still works when storage is blocked", async () => {
+      const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw new Error("blocked");
+      });
+      const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+        throw new Error("blocked");
+      });
+      const { backend } = fakeBackend();
+      renderWith(backend, <App />);
+      expect(shell()).toHaveAttribute("data-rail", "collapsed");
+      await userEvent.click(toggle("Expand menu"));
+      expect(shell()).toHaveAttribute("data-rail", "expanded");
+      get.mockRestore();
+      set.mockRestore();
+    });
+  });
+
   it("navigates between pages", async () => {
     const { backend } = fakeBackend();
     renderWith(backend, <App />);

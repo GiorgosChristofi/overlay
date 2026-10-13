@@ -66,6 +66,8 @@ export function ImportPanel({ report, canReimport, onReport }: Props) {
     );
   }
 
+  const problems = STEPS.filter(({ key }) => report[key].status !== "done");
+
   return (
     <section className="import" aria-labelledby="import-title">
       <header className="import-head">
@@ -78,16 +80,19 @@ export function ImportPanel({ report, canReimport, onReport }: Props) {
           </button>
         )}
       </header>
-      {report.source && <p className="import-source">Build from {report.source}</p>}
-      <ul className="steps">
-        {STEPS.map(({ key, label }) => (
-          <li key={key} className="step">
-            <StepGlyph result={report[key]} />
-            <span className="step-label">{label}</span>
-            <span className="step-text">{stepText(report[key])}</span>
-          </li>
-        ))}
-      </ul>
+      {/* Successful steps are what the player expects and only took space;
+          a skipped or failed one is the only sign that something was not set. */}
+      {problems.length > 0 && (
+        <ul className="steps">
+          {problems.map(({ key, label }) => (
+            <li key={key} className="step">
+              <StepGlyph result={report[key]} />
+              <span className="step-label">{label}</span>
+              <span className="step-text">{stepText(report[key])}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {error && (
         <p className="form-error" role="alert">
           {error}

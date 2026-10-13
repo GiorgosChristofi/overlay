@@ -232,13 +232,46 @@ p {
 
 .hero {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-4);
+  margin-bottom: var(--space-6);
 }
 
+.hero-text {
+  min-width: 0;
+}
+
+.hero-text h1 {
+  overflow-wrap: anywhere;
+}
+
+/* A button for the triple click that hides the name; it looks like the icon. */
 .hero-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  overflow: hidden;
   border-radius: 12px;
   border: 1px solid var(--line);
+  background: var(--surface);
+  cursor: default;
+  user-select: none;
+}
+
+.hero-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.hero-icon svg {
+  width: 28px;
+  height: 28px;
+  color: var(--muted);
 }
 
 .hero-sub {
@@ -248,70 +281,43 @@ p {
   color: var(--muted);
 }
 
-/* The phase rail: the one bold element of the app. */
-.track {
-  --rail-inset: 7px;
-  position: relative;
-  list-style: none;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  margin: var(--space-7) 0;
-  padding: 0;
-}
-
-.track::before,
-.track::after {
-  content: "";
-  position: absolute;
-  top: var(--rail-inset);
-  left: var(--rail-inset);
-  height: 2px;
-}
-
-.track::before {
-  right: calc(25% - var(--rail-inset));
-  background: var(--line);
-}
-
-.track::after {
-  width: calc((75% - 2 * var(--rail-inset)) * var(--progress));
-  background: var(--accent);
-  transition: width 400ms ease-out;
-}
-
-.track-step {
-  position: relative;
-  z-index: 1;
-  display: grid;
+/* The session phase: a small pill beside the summoner. */
+.phase-pill {
+  display: inline-flex;
+  align-items: center;
   gap: var(--space-2);
-}
-
-.track-node {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 2px solid var(--line);
-  background: var(--bg);
-}
-
-.track-step[data-state="past"] .track-node {
-  border-color: var(--accent);
-  background: var(--accent);
-}
-
-.track-step[data-state="current"] .track-node {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
-}
-
-.track-label {
+  margin: 0 0 0 auto;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
   font-family: var(--font-display);
   font-weight: 600;
-  color: var(--muted);
+  font-size: var(--step--1);
+  white-space: nowrap;
 }
 
-.track-step[data-state="current"] .track-label {
-  color: var(--text);
+.phase-pill .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.phase-pill[data-session="champSelect"] {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.phase-pill[data-session="champSelect"] .dot {
+  background: var(--accent);
+}
+
+.phase-pill[data-session="inGame"] {
+  border-color: color-mix(in srgb, var(--good) 60%, transparent);
+}
+
+.phase-pill[data-session="inGame"] .dot {
+  background: var(--good);
 }
 
 .import {
@@ -803,7 +809,6 @@ p {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .track::after,
   .switch,
   .switch::after,
   .rune-option,
@@ -819,6 +824,9 @@ p {
   }
   .rail {
     flex-direction: row;
+    /* Zoomed in, the bar is a few hundred pixels wide: wrap, don't overflow. */
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
     align-items: center;
     border-right: 0;
     border-bottom: 1px solid var(--line);

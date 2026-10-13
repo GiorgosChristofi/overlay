@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "./App";
 import { connected, fakeBackend, luxReport } from "./test/fakeBackend";
@@ -22,8 +22,7 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "Connected as Tester#EUW" })).toBeInTheDocument();
     expect(screen.getByText("Level 312")).toBeInTheDocument();
     expect(screen.getByText("Patch 16.19.1")).toBeInTheDocument();
-    const track = screen.getByRole("list", { name: "Game session" });
-    expect(within(track).getByText("Champ select").closest("li")).toHaveAttribute("aria-current", "step");
+    expect(screen.getByRole("status", { name: "Game session: Champ select" })).toBeInTheDocument();
   });
 
   it("shows an import as soon as it is emitted", async () => {

@@ -5,7 +5,7 @@
 //! open: then it shows a frame the player drags and resizes (bottom-right
 //! corner) to fit the minimap, with markers on the two pits to line up.
 
-use crate::app::{ACCENT, BG, MUTED, TEXT};
+use crate::app::{ACCENT, BG, TEXT};
 use crate::minimap::{pit_position, Placement, Shown};
 use crate::state::MinimapMode;
 use eframe::egui::{
@@ -182,21 +182,14 @@ fn at_pit(map: Rect, pit: PitDto) -> Pos2 {
     map.min + Vec2::new(fx * map.width(), fy * map.height())
 }
 
-/// A small label centred on the pit: what spawns, and in how long.
+/// The countdown, centred on its pit (the minimap's own icon says what spawns).
 fn draw_timer(ui: &Ui, map: Rect, timer: &Shown) {
     let painter = ui.painter();
     let at = at_pit(map, timer.pit);
     // Scale with the minimap so a large one is not cluttered with tiny text.
     let scale = (map.width() / 280.0).clamp(0.8, 1.6);
-    let label = painter.layout_no_wrap(
-        timer.label.clone(),
-        FontId::proportional(9.5 * scale),
-        MUTED,
-    );
     let time = painter.layout_no_wrap(timer.time.clone(), FontId::monospace(13.0 * scale), TEXT);
-    let width = label.size().x.max(time.size().x) + 8.0 * scale;
-    let height = label.size().y + time.size().y + 2.0 * scale;
-    let bg = Rect::from_center_size(at, Vec2::new(width, height));
+    let bg = Rect::from_center_size(at, time.size() + Vec2::new(8.0, 2.0) * scale);
     painter.rect_filled(bg, CornerRadius::same(4), Color32::from_black_alpha(190));
     painter.rect_stroke(
         bg,
@@ -204,15 +197,5 @@ fn draw_timer(ui: &Ui, map: Rect, timer: &Shown) {
         Stroke::new(1.0, ACCENT.gamma_multiply(0.6)),
         StrokeKind::Inside,
     );
-    let top = bg.min.y + scale;
-    painter.galley(
-        Pos2::new(at.x - label.size().x / 2.0, top),
-        label.clone(),
-        MUTED,
-    );
-    painter.galley(
-        Pos2::new(at.x - time.size().x / 2.0, top + label.size().y),
-        time,
-        TEXT,
-    );
+    painter.galley(at - time.size() / 2.0, time, TEXT);
 }

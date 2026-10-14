@@ -43,7 +43,6 @@ pub struct Timers {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shown {
     pub pit: PitDto,
-    pub label: String,
     /// `m:ss`.
     pub time: String,
 }
@@ -66,7 +65,6 @@ impl Timers {
             .filter(|t| t.spawn_at_ms > game_now)
             .map(|t| Shown {
                 pit: t.pit,
-                label: t.label.clone(),
                 time: countdown(t.spawn_at_ms - game_now),
             })
             .collect()
@@ -176,7 +174,7 @@ mod tests {
         // At 5:00 the dragon is up: only the grubs remain.
         let later = t.shown(t0 + Duration::from_millis(1000));
         assert_eq!(later.len(), 1);
-        assert_eq!(later[0].label, "Grubs");
+        assert_eq!(later[0].pit, PitDto::Baron, "the grubs' pit");
         assert_eq!(later[0].time, "3:00");
     }
 

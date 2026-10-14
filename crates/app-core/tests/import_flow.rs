@@ -280,8 +280,14 @@ impl Harness {
         self.sink.overlays.lock().unwrap().clone()
     }
     /// Item ids per block of the last overlay view.
+    /// The latest item view (objective timers arrive in between).
     fn overlay_items(&self) -> Vec<(OverlayBlockKind, Vec<i32>)> {
-        match self.overlays().last() {
+        let overlays = self.overlays();
+        let latest = overlays
+            .iter()
+            .rev()
+            .find(|m| !matches!(m, OverlayMessage::Objectives(_)));
+        match latest {
             Some(OverlayMessage::Items(view)) => view
                 .starting
                 .iter()
@@ -1287,5 +1293,137 @@ async fn no_objective_timers_outside_summoners_rift() {
     assert_eq!(
         objective_messages(&h),
         Vec::<Option<ObjectiveTimersDto>>::new()
+    );
+}
+
+fn in_practice_tool(
+    game_time_ms: u64,
+    kills: Vec<ObjectiveKill>,
+    items: Vec<(i64, u32)>,
+) -> LiveSnapshot {
+    LiveSnapshot {
+        game_time_ms,
+        summoners_rift: true,
+        game_mode: "PRACTICETOOL".into(),
+        objective_kills: kills,
+        inventory: items,
+        ..Default::default()
+    }
+}
+
+fn dragon_timer(h: &Harness) -> Option<u64> {
+    let timers = objective_messages(h).last().cloned().flatten()?;
+    timers
+        .timers
+        .iter()
+        .find(|t| t.pit == PitDto::Dragon)
+        .map(|t| t.spawn_at_ms)
+}
+
+#[tokio::test]
+async fn practice_tool_fast_forward_moves_timers_and_a_reset_forgets_the_old_game() {
+    let h = harness(FakeLcu::default(), Settings::default());
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::InProgress))
+        .await;
+    let old_dragon = ObjectiveKill {
+        at_ms: 362_000,
+        kind: KillKind::Dragon,
+        team: Some(Team::Order),
+    };
+
+    h.core
+        .live_tick(Some(in_practice_tool(30_000, vec![], vec![(1056, 1)])));
+    assert_eq!(dragon_timer(&h), Some(300_000), "first dragon at 5:00");
+
+    // Fast-forward to 6:30, the dragon slain at 6:02: 5:00 after the kill.
+    h.core.live_tick(Some(in_practice_tool(
+        390_000,
+        vec![old_dragon],
+        vec![(1056, 1)],
+    )));
+    assert_eq!(dragon_timer(&h), Some(662_000));
+
+    // Reset Game: the clock is back near 0 and the game still lists the old
+    // kill. The first dragon is due at 5:00 again, and stays so once the new
+    // clock passes the old kill's time.
+    h.core
+        .live_tick(Some(in_practice_tool(2_000, vec![old_dragon], vec![])));
+    assert_eq!(dragon_timer(&h), Some(300_000));
+    h.core
+        .live_tick(Some(in_practice_tool(290_000, vec![old_dragon], vec![])));
+    assert_eq!(dragon_timer(&h), Some(300_000));
+    h.core
+        .live_tick(Some(in_practice_tool(370_000, vec![old_dragon], vec![])));
+    assert_eq!(dragon_timer(&h), None, "the new game's first dragon is up");
+
+    // A dragon slain in the new game counts as usual.
+    let new_dragon = ObjectiveKill {
+        at_ms: 380_500,
+        kind: KillKind::Dragon,
+        team: Some(Team::Chaos),
+    };
+    h.core.live_tick(Some(in_practice_tool(
+        381_000,
+        vec![old_dragon, new_dragon],
+        vec![],
+    )));
+    assert_eq!(dragon_timer(&h), Some(680_500));
+}
+
+#[tokio::test]
+async fn a_reset_that_clears_the_games_events_also_starts_over() {
+    let h = harness(FakeLcu::default(), Settings::default());
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::InProgress))
+        .await;
+    let old_dragon = ObjectiveKill {
+        at_ms: 362_000,
+        kind: KillKind::Dragon,
+        team: Some(Team::Order),
+    };
+    h.core
+        .live_tick(Some(in_practice_tool(390_000, vec![old_dragon], vec![])));
+    h.core
+        .live_tick(Some(in_practice_tool(1_000, vec![], vec![])));
+    assert_eq!(dragon_timer(&h), Some(300_000));
+    let new_dragon = ObjectiveKill {
+        at_ms: 301_000,
+        kind: KillKind::Dragon,
+        team: Some(Team::Order),
+    };
+    h.core
+        .live_tick(Some(in_practice_tool(302_000, vec![new_dragon], vec![])));
+    assert_eq!(dragon_timer(&h), Some(601_000));
+}
+
+#[tokio::test]
+async fn a_practice_tool_reset_forgets_what_was_bought() {
+    let h = harness(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+    );
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
+        .await;
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::InProgress))
+        .await;
+    h.core
+        .live_tick(Some(in_practice_tool(400_000, vec![], vec![(1056, 1)])));
+    assert_eq!(h.overlay_items(), [(OverlayBlockKind::Starter, vec![2003])]);
+
+    // Reset Game: the inventory is empty again, so are the bought items.
+    h.core
+        .live_tick(Some(in_practice_tool(1_000, vec![], vec![])));
+    assert_eq!(
+        h.overlay_items(),
+        [(OverlayBlockKind::Starter, vec![1056, 2003])]
     );
 }

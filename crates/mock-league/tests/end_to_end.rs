@@ -612,9 +612,67 @@ async fn an_aram_game_gets_no_objective_timers() {
         gold: 777.0,
         game_time: 600.0,
         game_mode: "ARAM".into(),
+        map_number: 12,
         ..LiveStep::default()
     }));
     // Live reads are flowing (gold arrives), yet no timers are sent.
     tokio::time::sleep(Duration::from_millis(2500)).await;
     assert_eq!(app.last_objectives(), None);
+}
+
+#[tokio::test]
+async fn the_practice_tool_gets_timers_that_follow_fast_forward_and_reset() {
+    let app = App::start(Setup::default(), Settings::default()).await;
+    app.connected().await;
+    app.mock.run(&[Step::Phase("InProgress".into())]).await;
+    let practice = |game_time: f64, events: Vec<serde_json::Value>| {
+        Step::Live(LiveStep {
+            game_time,
+            game_mode: "PRACTICETOOL".into(),
+            events,
+            ..LiveStep::default()
+        })
+    };
+    let dragon_at = |timers: &Option<ipc_types::ObjectiveTimersDto>| {
+        timers.as_ref().and_then(|t| {
+            t.timers
+                .iter()
+                .find(|t| t.pit == ipc_types::PitDto::Dragon)
+                .map(|t| t.spawn_at_ms)
+        })
+    };
+    let at = |ms: u64| {
+        move |t: &Option<ipc_types::ObjectiveTimersDto>| {
+            t.as_ref().is_some_and(|t| t.game_time_ms == ms)
+        }
+    };
+
+    app.mock.apply(&practice(20.0, vec![]));
+    let t = app
+        .objectives_until("practice tool timers", at(20_000))
+        .await;
+    assert_eq!(dragon_at(&t), Some(300_000));
+
+    // Fast-forward to 6:30 and slay the dragon at 6:02.4.
+    let dragon = serde_json::json!({ "EventName": "DragonKill", "EventTime": 362.4,
+        "DragonType": "Fire", "Stolen": "False", "KillerName": "Tester" });
+    app.mock.apply(&practice(390.0, vec![dragon.clone()]));
+    let t = app
+        .objectives_until("the fast-forwarded clock", at(390_000))
+        .await;
+    assert_eq!(dragon_at(&t), Some(662_400));
+
+    // Reset Game: the clock restarts and the game still lists the old kill.
+    app.mock.apply(&practice(3.0, vec![dragon.clone()]));
+    let t = app.objectives_until("the reset clock", at(3_000)).await;
+    assert_eq!(
+        dragon_at(&t),
+        Some(300_000),
+        "the old dragon no longer counts"
+    );
+    app.mock.apply(&practice(370.0, vec![dragon]));
+    let t = app
+        .objectives_until("past the old kill's time", at(370_000))
+        .await;
+    assert_eq!(dragon_at(&t), None, "the new game's first dragon is up");
 }

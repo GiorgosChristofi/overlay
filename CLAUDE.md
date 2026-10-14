@@ -54,7 +54,11 @@ traps in this Windows dev environment.
   read while on the Rift and `None` once after. The overlay draws them in a
   second egui viewport (`apps/overlay/src/minimap_view.rs`, window title
   `LoL Overlay timers`), counting on from the last game time for at most
-  1.5 s (`minimap.rs`), so a stalled read never runs a timer ahead. Normal
+  1.5 s (`minimap.rs`), so a stalled read never runs a timer ahead. Timed
+  modes: `CLASSIC` and `PRACTICETOOL` on map 11 (`live.rs`; the mode is
+  logged once per game). A clock that steps back >5 s is a Practice Tool
+  reset: kills seen before it no longer count (the game may keep or clear
+  its event list) and purchases start over. Normal
   camps cannot be timed: the public API does not report them; Porofessor
   gets them from Overwolf's own `jungle_camps` game events.
 - IPC DTOs live in `ipc-types`; `cargo test` regenerates `ui/src/bindings`

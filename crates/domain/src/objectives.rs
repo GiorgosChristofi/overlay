@@ -175,6 +175,30 @@ fn next_in_baron_pit(kills: &[&ObjectiveKill], now_ms: u64) -> Upcoming {
     }
 }
 
+/// How far the game clock may step back between two reads before it counts
+/// as a reset. Reads are a second apart and the clock only moves forward in a
+/// game, so any real step back is the Practice Tool's "Reset Game".
+pub const RESET_TOLERANCE_MS: u64 = 5_000;
+
+/// Whether the clock went back far enough to be a game reset. Moving forward
+/// by any amount (the Practice Tool's fast-forward) is not a reset: timers
+/// simply follow the new time.
+pub fn is_reset(previous_ms: u64, now_ms: u64) -> bool {
+    now_ms + RESET_TOLERANCE_MS < previous_ms
+}
+
+/// Kills that belong to the current game: those seen before a reset are
+/// dropped. The game may or may not clear its event list on a reset; either
+/// way a kill from before it is the very same event (same time, kind and
+/// team) and is skipped, while a new one never matches to the millisecond.
+pub fn since_reset(kills: &[ObjectiveKill], before_reset: &[ObjectiveKill]) -> Vec<ObjectiveKill> {
+    kills
+        .iter()
+        .filter(|k| !before_reset.contains(k))
+        .copied()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,6 +341,58 @@ mod tests {
             next.spawn_at_ms,
             17 * MIN,
             "the 20:00 kill has not happened yet"
+        );
+    }
+
+    #[test]
+    fn fast_forward_is_not_a_reset_and_a_step_back_is() {
+        assert!(!is_reset(60_000, 61_000));
+        assert!(!is_reset(60_000, 30 * MIN), "fast-forward");
+        assert!(!is_reset(60_000, 57_000), "a read answered out of order");
+        assert!(is_reset(25 * MIN, 1_000), "Reset Game");
+    }
+
+    #[test]
+    fn fast_forward_moves_timers_with_the_game_clock() {
+        let kills = [dragon(6 * MIN, Some(Team::Order))];
+        assert_eq!(
+            pit(&kills, 7 * MIN, Pit::Dragon).unwrap().spawn_at_ms,
+            11 * MIN
+        );
+        // Jumped to 10:30: same spawn time, 30 s left.
+        assert_eq!(
+            pit(&kills, 10 * MIN + 30_000, Pit::Dragon)
+                .unwrap()
+                .spawn_at_ms,
+            11 * MIN
+        );
+        assert_eq!(
+            pit(&kills, 12 * MIN, Pit::Dragon),
+            None,
+            "past it: dragon is up"
+        );
+    }
+
+    #[test]
+    fn after_a_reset_old_kills_no_longer_count_whether_or_not_the_game_keeps_them() {
+        let old = [
+            dragon(6 * MIN, Some(Team::Order)),
+            kill(26 * MIN, KillKind::Baron),
+        ];
+        let new_dragon = dragon(5 * MIN + 2_000, Some(Team::Chaos));
+        // The game kept its old events and added a new one.
+        let kept: Vec<ObjectiveKill> = old.iter().copied().chain([new_dragon]).collect();
+        assert_eq!(since_reset(&kept, &old), [new_dragon]);
+        // The game cleared its events.
+        assert_eq!(since_reset(&[new_dragon], &old), [new_dragon]);
+        // Back at 7:00 after a reset, the old 6:00 dragon does not restart the
+        // timer: the first dragon is still due... and up.
+        assert_eq!(pit(&since_reset(&old, &old), 7 * MIN, Pit::Dragon), None);
+        assert_eq!(
+            pit(&since_reset(&old, &old), MIN, Pit::Dragon)
+                .unwrap()
+                .spawn_at_ms,
+            5 * MIN
         );
     }
 

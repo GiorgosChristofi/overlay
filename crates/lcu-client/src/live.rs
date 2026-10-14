@@ -109,6 +109,8 @@ struct Event {
 #[serde(rename_all = "camelCase", default)]
 struct GameData {
     game_mode: String,
+    /// 11 is Summoner's Rift; 0 when the field is missing.
+    map_number: u32,
     /// Seconds since the game started.
     game_time: f64,
 }
@@ -179,9 +181,23 @@ pub fn parse_all_game_data(raw: &str) -> Result<Option<LiveSnapshot>, PortError>
             .map(|i| (i.item_id, i.count.max(1)))
             .collect(),
         game_time_ms: game_ms(data.game_data.game_time),
-        summoners_rift: data.game_data.game_mode == "CLASSIC",
+        summoners_rift: has_rift_objectives(&data.game_data),
+        game_mode: data.game_data.game_mode.chars().take(32).collect(),
         objective_kills: objective_kills(&data.events.events, &data.all_players),
     }))
+}
+
+/// Summoner's Rift's map number in the Live Client Data API.
+const SUMMONERS_RIFT_MAP: u32 = 11;
+/// Modes on the Rift whose objectives follow the normal timings: every
+/// queue (`CLASSIC`) and the Practice Tool. Others on the same map (URF,
+/// Swiftplay, ...) change the timings, so they get no timers rather than
+/// wrong ones.
+const TIMED_MODES: [&str; 2] = ["CLASSIC", "PRACTICETOOL"];
+
+fn has_rift_objectives(game: &GameData) -> bool {
+    let on_rift = game.map_number == SUMMONERS_RIFT_MAP || game.map_number == 0;
+    on_rift && TIMED_MODES.contains(&game.game_mode.as_str())
 }
 
 /// A game lasts at most a few hours; anything beyond this is not a game time.
@@ -290,6 +306,23 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn the_practice_tool_is_timed_like_a_rift_game_and_other_modes_are_not() {
+        let mode = |mode: &str, map: u32| {
+            let raw = format!(
+                r#"{{"activePlayer":{{"riotId":"Me#1"}},"allPlayers":[{{"riotId":"Me#1"}}],
+                "gameData":{{"gameMode":"{mode}","mapNumber":{map},"gameTime":10}}}}"#
+            );
+            parse_all_game_data(&raw).unwrap().unwrap()
+        };
+        assert!(mode("CLASSIC", 11).summoners_rift);
+        assert!(mode("PRACTICETOOL", 11).summoners_rift);
+        assert_eq!(mode("PRACTICETOOL", 11).game_mode, "PRACTICETOOL");
+        assert!(!mode("ARAM", 12).summoners_rift);
+        assert!(!mode("URF", 11).summoners_rift, "different timings");
+        assert!(!mode("CLASSIC", 30).summoners_rift, "another map");
     }
 
     #[test]

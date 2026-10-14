@@ -58,8 +58,11 @@ pub struct LiveSnapshot {
     pub inventory: Vec<(i64, u32)>,
     /// The game clock (`gameData.gameTime`) when this was read.
     pub game_time_ms: u64,
-    /// A Summoner's Rift game (`CLASSIC`), the only map with these pits.
+    /// A Summoner's Rift game with the normal objective timings (any queue
+    /// or the Practice Tool); only these get objective timers.
     pub summoners_rift: bool,
+    /// The API's `gameMode` (e.g. `CLASSIC`, `PRACTICETOOL`), for logs.
+    pub game_mode: String,
     /// Dragons, Elders and Barons slain so far, by either team.
     pub objective_kills: Vec<ObjectiveKill>,
 }

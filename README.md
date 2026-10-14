@@ -161,7 +161,10 @@ the next epic monster spawns in each pit:
 They are automatic for both teams: the times come from the game's own
 `DragonKill` and `BaronKill` events and its clock (`gameData.gameTime`),
 never your PC's clock, so pauses and slow reads cannot shift them. A pit
-whose monster is up shows nothing. Normal camps (buffs, Gromp, wolves,
+whose monster is up shows nothing. They run in every Summoner's Rift queue
+and in the Practice Tool, where fast-forwarding moves them with the clock and
+**Reset Game** starts them (and the bought items) over; other modes on the
+Rift, like URF, change the timings and get none. Normal camps (buffs, Gromp, wolves,
 raptors, krugs, Scuttle) are not timed: the public API does not report
 them, and reading the screen or game memory is not allowed.
 

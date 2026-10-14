@@ -193,8 +193,10 @@ pub struct LiveStep {
     pub champion_name: String,
     pub game_time: f64,
     pub level: u32,
-    /// `ARAM` or `CLASSIC`.
+    /// `CLASSIC`, `PRACTICETOOL`, `ARAM`, ...
     pub game_mode: String,
+    /// 11 is Summoner's Rift, 12 Howling Abyss (ARAM).
+    pub map_number: u32,
     /// Game events after `GameStart`, as the API lists them, e.g.
     /// `{ "EventName": "DragonKill", "EventTime": 362.4, "DragonType": "Fire",
     /// "KillerName": "Tester" }`. Every step lists all events so far.
@@ -210,6 +212,7 @@ impl Default for LiveStep {
             game_time: 0.0,
             level: 1,
             game_mode: "CLASSIC".into(),
+            map_number: 11,
             events: Vec::new(),
         }
     }
@@ -248,7 +251,7 @@ impl LiveStep {
                   "items": [{ "itemID": 1055, "count": 1, "slot": 0 }] },
             ],
             "events": { "Events": events },
-            "gameData": { "gameMode": self.game_mode, "gameTime": self.game_time },
+            "gameData": { "gameMode": self.game_mode, "mapNumber": self.map_number, "gameTime": self.game_time },
         })
     }
 }

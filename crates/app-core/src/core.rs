@@ -7,7 +7,7 @@ use crate::overlay::{overlay_view, OverlayChoices, OverlayInputs};
 use crate::settings_store::{SettingsError, SettingsStore};
 use domain::builds::Build;
 use domain::champ_select::{selected_pick, ChampionPick, GameMode};
-use domain::objectives::{self, Pit};
+use domain::objectives::{self, ObjectiveKill, Pit};
 use domain::ports::{BuildSource, LcuEvent, LcuPort, LiveSnapshot};
 use domain::session::{transition, SessionEvent, SessionState};
 use domain::settings::Settings;
@@ -87,6 +87,8 @@ struct State {
     last_overlay: Option<OverlayMessage>,
     /// Last objective timers sent to the overlay, to send only changes.
     last_objectives: Option<ObjectiveTimersDto>,
+    /// Kills from before a Practice Tool reset, which no longer count.
+    kills_before_reset: Vec<ObjectiveKill>,
 }
 
 impl State {
@@ -114,23 +116,27 @@ impl State {
         let live = self.live.as_ref().filter(|l| l.summoners_rift)?;
         Some(ObjectiveTimersDto {
             game_time_ms: live.game_time_ms,
-            timers: objectives::upcoming(&live.objective_kills, live.game_time_ms)
-                .into_iter()
-                .map(|u| ObjectiveTimerDto {
-                    pit: match u.pit {
-                        Pit::Dragon => PitDto::Dragon,
-                        Pit::Baron => PitDto::Baron,
-                    },
-                    label: u.monster.label().to_owned(),
-                    spawn_at_ms: u.spawn_at_ms,
-                })
-                .collect(),
+            timers: objectives::upcoming(
+                &objectives::since_reset(&live.objective_kills, &self.kills_before_reset),
+                live.game_time_ms,
+            )
+            .into_iter()
+            .map(|u| ObjectiveTimerDto {
+                pit: match u.pit {
+                    Pit::Dragon => PitDto::Dragon,
+                    Pit::Baron => PitDto::Baron,
+                },
+                label: u.monster.label().to_owned(),
+                spawn_at_ms: u.spawn_at_ms,
+            })
+            .collect(),
         })
     }
 
     /// A new game (or none): forget what was bought.
     fn reset_game(&mut self) {
         self.purchases = Purchases::default();
+        self.kills_before_reset.clear();
         self.choices = OverlayChoices::default();
         self.live = None;
     }
@@ -172,6 +178,7 @@ impl Core {
                 live: None,
                 last_overlay: None,
                 last_objectives: None,
+                kills_before_reset: Vec::new(),
             }),
             sources,
             settings_store,
@@ -314,7 +321,35 @@ impl Core {
                 return;
             }
             if let Some(snap) = &snapshot {
+                // The Practice Tool's "Reset Game" turns the clock back: what
+                // happened before no longer counts. (Fast-forward only moves
+                // it on, which the timers follow by themselves.)
+                let previous = s
+                    .live
+                    .as_ref()
+                    .map(|l| (l.game_time_ms, l.objective_kills.clone()));
+                if let Some((was_ms, kills)) = previous {
+                    if objectives::is_reset(was_ms, snap.game_time_ms) {
+                        tracing::info!(from_ms = was_ms, to_ms = snap.game_time_ms, "game reset");
+                        for kill in kills.iter().chain(&snap.objective_kills) {
+                            if !s.kills_before_reset.contains(kill) {
+                                s.kills_before_reset.push(*kill);
+                            }
+                        }
+                        s.purchases = Purchases::default();
+                    }
+                }
                 s.purchases.observe(&snap.inventory);
+                // Once per game: which mode it is and whether it is timed,
+                // so a player missing timers can see why in the log.
+                let mode = s.live.as_ref().map(|l| &l.game_mode);
+                if mode != Some(&snap.game_mode) {
+                    tracing::info!(
+                        game_mode = %snap.game_mode,
+                        objective_timers = snap.summoners_rift,
+                        "reading the live game"
+                    );
+                }
             }
             s.live = snapshot;
         }

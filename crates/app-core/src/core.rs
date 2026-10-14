@@ -7,6 +7,7 @@ use crate::overlay::{overlay_view, OverlayChoices, OverlayInputs};
 use crate::settings_store::{SettingsError, SettingsStore};
 use domain::builds::Build;
 use domain::champ_select::{selected_pick, ChampionPick, GameMode};
+use domain::objectives::{self, Pit};
 use domain::ports::{BuildSource, LcuEvent, LcuPort, LiveSnapshot};
 use domain::session::{transition, SessionEvent, SessionState};
 use domain::settings::Settings;
@@ -14,8 +15,8 @@ use domain::shopping::Purchases;
 use domain::static_catalog::StaticCatalog;
 use domain::summoner::Summoner;
 use ipc_types::{
-    ImportReportDto, OverlayCommand, OverlayMessage, RuneCatalogDto, RuneDto, RuneTreeDto,
-    SessionStateDto, StatusDto, SummonerDto,
+    ImportReportDto, ObjectiveTimerDto, ObjectiveTimersDto, OverlayCommand, OverlayMessage, PitDto,
+    RuneCatalogDto, RuneDto, RuneTreeDto, SessionStateDto, StatusDto, SummonerDto,
 };
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -84,6 +85,8 @@ struct State {
     live: Option<LiveSnapshot>,
     /// Last view sent to the overlay, to send only changes.
     last_overlay: Option<OverlayMessage>,
+    /// Last objective timers sent to the overlay, to send only changes.
+    last_objectives: Option<ObjectiveTimersDto>,
 }
 
 impl State {
@@ -104,6 +107,25 @@ impl State {
             choices: &self.choices,
             live: self.live.as_ref(),
         })))
+    }
+
+    /// Epic objective timers, from the latest read of a Summoner's Rift game.
+    fn objective_timers(&self) -> Option<ObjectiveTimersDto> {
+        let live = self.live.as_ref().filter(|l| l.summoners_rift)?;
+        Some(ObjectiveTimersDto {
+            game_time_ms: live.game_time_ms,
+            timers: objectives::upcoming(&live.objective_kills, live.game_time_ms)
+                .into_iter()
+                .map(|u| ObjectiveTimerDto {
+                    pit: match u.pit {
+                        Pit::Dragon => PitDto::Dragon,
+                        Pit::Baron => PitDto::Baron,
+                    },
+                    label: u.monster.label().to_owned(),
+                    spawn_at_ms: u.spawn_at_ms,
+                })
+                .collect(),
+        })
     }
 
     /// A new game (or none): forget what was bought.
@@ -149,6 +171,7 @@ impl Core {
                 choices: OverlayChoices::default(),
                 live: None,
                 last_overlay: None,
+                last_objectives: None,
             }),
             sources,
             settings_store,
@@ -255,6 +278,23 @@ impl Core {
         };
         if let Some(message) = changed {
             self.sink.overlay(&message);
+        }
+        self.publish_objectives();
+    }
+
+    /// Sends the objective timers when they changed (in game: every read,
+    /// as the clock moves), and `None` once when the game is gone.
+    fn publish_objectives(&self) {
+        let changed = {
+            let mut s = self.lock();
+            let timers = s.objective_timers();
+            (s.last_objectives != timers).then(|| {
+                s.last_objectives.clone_from(&timers);
+                timers
+            })
+        };
+        if let Some(timers) = changed {
+            self.sink.overlay(&OverlayMessage::Objectives(timers));
         }
     }
 

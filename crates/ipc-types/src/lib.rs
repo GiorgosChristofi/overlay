@@ -215,6 +215,43 @@ pub enum OverlayMessage {
     Items(Box<OverlayViewDto>),
     /// No build (yet): show the empty state.
     Clear,
+    /// Epic objective timers for the minimap, about once a second in a
+    /// Summoner's Rift game; `None` when there is no such game.
+    Objectives(Option<ObjectiveTimersDto>),
+}
+
+/// The next spawn in each pit, against the game clock.
+///
+/// Times are game time, not wall time: the overlay counts down from
+/// `game_time_ms` itself between messages, so timers stay on the game's
+/// clock even though it is only read once a second.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveTimersDto {
+    /// The game clock when it was read.
+    pub game_time_ms: u64,
+    /// One per pit at most; a pit whose monster is up has none.
+    pub timers: Vec<ObjectiveTimerDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveTimerDto {
+    pub pit: PitDto,
+    /// What spawns, e.g. `Dragon`, `Elder`, `Baron`.
+    pub label: String,
+    /// Game time it spawns.
+    pub spawn_at_ms: u64,
+}
+
+/// Where a timer is drawn on the minimap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PitDto {
+    /// Bottom river.
+    Dragon,
+    /// Top river: Voidgrubs, Herald, Baron.
+    Baron,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -358,6 +395,27 @@ mod tests {
             removed_count: 0,
             blocks: vec![],
         };
+        let timers = OverlayMessage::Objectives(Some(ObjectiveTimersDto {
+            game_time_ms: 61_000,
+            timers: vec![ObjectiveTimerDto {
+                pit: PitDto::Dragon,
+                label: "Dragon".into(),
+                spawn_at_ms: 300_000,
+            }],
+        }));
+        let timers_line = serde_json::to_string(&timers).unwrap();
+        assert_eq!(
+            timers_line,
+            r#"{"type":"objectives","view":{"gameTimeMs":61000,"timers":[{"pit":"dragon","label":"Dragon","spawnAtMs":300000}]}}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<OverlayMessage>(&timers_line).unwrap(),
+            timers
+        );
+        assert_eq!(
+            serde_json::to_string(&OverlayMessage::Objectives(None)).unwrap(),
+            r#"{"type":"objectives","view":null}"#
+        );
         let line = serde_json::to_string(&OverlayMessage::Items(Box::new(view.clone()))).unwrap();
         assert!(!line.contains('\n'));
         assert_eq!(

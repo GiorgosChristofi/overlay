@@ -3,6 +3,7 @@
 //! is signed by the same Riot root certificate as the LCU.
 
 use async_trait::async_trait;
+use domain::objectives::{KillKind, ObjectiveKill, Team};
 use domain::ports::{LiveGamePort, LiveSnapshot};
 use domain::PortError;
 use reqwest::StatusCode;
@@ -78,6 +79,38 @@ impl LiveGamePort for LiveClient {
 struct AllGameData {
     active_player: ActivePlayer,
     all_players: Vec<Player>,
+    events: Events,
+    game_data: GameData,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Events {
+    #[serde(rename = "Events")]
+    events: Vec<Event>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Event {
+    #[serde(rename = "EventName")]
+    name: String,
+    /// Game time in seconds.
+    #[serde(rename = "EventTime")]
+    time: f64,
+    /// `DragonKill` only: `Fire`, `Water`, ..., or `Elder`.
+    #[serde(rename = "DragonType")]
+    dragon_type: String,
+    #[serde(rename = "KillerName")]
+    killer_name: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct GameData {
+    game_mode: String,
+    /// Seconds since the game started.
+    game_time: f64,
 }
 
 #[derive(Deserialize, Default)]
@@ -92,8 +125,26 @@ struct ActivePlayer {
 #[serde(rename_all = "camelCase", default)]
 struct Player {
     riot_id: String,
+    riot_id_game_name: String,
     summoner_name: String,
+    team: String,
     items: Vec<Item>,
+}
+
+impl Player {
+    /// Event `KillerName`s have been the summoner name, the Riot ID, or its
+    /// game name alone, depending on the client version.
+    fn is_named(&self, name: &str) -> bool {
+        let game_name = self.riot_id.split('#').next().unwrap_or_default();
+        !name.is_empty()
+            && [
+                self.riot_id.as_str(),
+                self.riot_id_game_name.as_str(),
+                self.summoner_name.as_str(),
+                game_name,
+            ]
+            .contains(&name)
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -127,7 +178,46 @@ pub fn parse_all_game_data(raw: &str) -> Result<Option<LiveSnapshot>, PortError>
             .filter(|i| i.item_id > 0)
             .map(|i| (i.item_id, i.count.max(1)))
             .collect(),
+        game_time_ms: game_ms(data.game_data.game_time),
+        summoners_rift: data.game_data.game_mode == "CLASSIC",
+        objective_kills: objective_kills(&data.events.events, &data.all_players),
     }))
+}
+
+/// A game lasts at most a few hours; anything beyond this is not a game time.
+const MAX_GAME_SECONDS: f64 = 24.0 * 3600.0;
+/// More epic kills than any real game; a bound on what the API can make us keep.
+const MAX_OBJECTIVE_KILLS: usize = 256;
+
+/// Seconds (as the API sends them) to whole milliseconds, clamped to a game.
+fn game_ms(seconds: f64) -> u64 {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // clamped to 0..=24 h
+    let ms = (seconds.clamp(0.0, MAX_GAME_SECONDS) * 1000.0).round() as u64;
+    ms
+}
+
+fn objective_kills(events: &[Event], players: &[Player]) -> Vec<ObjectiveKill> {
+    events
+        .iter()
+        .filter_map(|e| {
+            let kind = match (e.name.as_str(), e.dragon_type.as_str()) {
+                ("DragonKill", "Elder") => KillKind::Elder,
+                ("DragonKill", _) => KillKind::Dragon,
+                ("BaronKill", _) => KillKind::Baron,
+                _ => return None,
+            };
+            let team = players
+                .iter()
+                .find(|p| p.is_named(&e.killer_name))
+                .and_then(|p| Team::from_api(&p.team));
+            Some(ObjectiveKill {
+                at_ms: game_ms(e.time),
+                kind,
+                team,
+            })
+        })
+        .take(MAX_OBJECTIVE_KILLS)
+        .collect()
 }
 
 #[cfg(test)]
@@ -149,6 +239,74 @@ mod tests {
         let raw = r#"{"activePlayer":{"currentGold":5,"summonerName":"Old"},"allPlayers":[{"summonerName":"Old","items":[{"itemID":1001,"count":1}]}]}"#;
         let s = parse_all_game_data(raw).unwrap().unwrap();
         assert_eq!(s.inventory, [(1001, 1)]);
+    }
+
+    #[test]
+    fn reads_the_game_clock_and_epic_kills_with_the_killers_team() {
+        let s = parse_all_game_data(FIXTURE).unwrap().unwrap();
+        assert_eq!(s.game_time_ms, 612_400);
+        assert!(s.summoners_rift);
+        // Champion kills and grubs are not timed; the killer's game name
+        // ("Enemy") is matched to their Riot ID ("Enemy#EUW").
+        assert_eq!(
+            s.objective_kills,
+            [
+                ObjectiveKill {
+                    at_ms: 362_750,
+                    kind: KillKind::Dragon,
+                    team: Some(Team::Order)
+                },
+                ObjectiveKill {
+                    at_ms: 605_500,
+                    kind: KillKind::Dragon,
+                    team: Some(Team::Chaos)
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn elder_and_baron_kills_are_told_apart_and_unknown_killers_have_no_team() {
+        let raw = r#"{"activePlayer":{"riotId":"Me#1"},
+            "allPlayers":[{"riotId":"Me#1","summonerName":"Me","team":"CHAOS","items":[]}],
+            "events":{"Events":[
+                {"EventName":"DragonKill","EventTime":1800,"DragonType":"Elder","KillerName":"Me"},
+                {"EventName":"BaronKill","EventTime":1500.5,"KillerName":"Minion_T100L1S04N0003"}]},
+            "gameData":{"gameMode":"ARAM","gameTime":1801}}"#;
+        let s = parse_all_game_data(raw).unwrap().unwrap();
+        assert!(!s.summoners_rift);
+        assert_eq!(
+            s.objective_kills,
+            [
+                ObjectiveKill {
+                    at_ms: 1_800_000,
+                    kind: KillKind::Elder,
+                    team: Some(Team::Chaos)
+                },
+                ObjectiveKill {
+                    at_ms: 1_500_500,
+                    kind: KillKind::Baron,
+                    team: None
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn untrusted_times_and_event_floods_are_bounded() {
+        let flood: Vec<String> = (0..1000)
+            .map(|i| format!(r#"{{"EventName":"BaronKill","EventTime":{i}}}"#))
+            .collect();
+        let raw = format!(
+            r#"{{"activePlayer":{{"riotId":"Me#1"}},"allPlayers":[{{"riotId":"Me#1"}}],
+            "events":{{"Events":[{{"EventName":"DragonKill","EventTime":-5}},{}]}},
+            "gameData":{{"gameTime":1e300}}}}"#,
+            flood.join(",")
+        );
+        let s = parse_all_game_data(&raw).unwrap().unwrap();
+        assert_eq!(s.game_time_ms, 24 * 3600 * 1000, "clamped to a day");
+        assert_eq!(s.objective_kills.len(), 256);
+        assert_eq!(s.objective_kills[0].at_ms, 0, "negative times clamp to 0");
     }
 
     #[test]

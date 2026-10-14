@@ -6,6 +6,8 @@
 mod app;
 mod commands;
 mod input;
+mod minimap;
+mod minimap_view;
 mod state;
 mod stdin;
 
@@ -54,7 +56,16 @@ pub fn run() -> Result<(), String> {
                 .storage
                 .and_then(|s| s.get_string(SAVED_WINDOW_KEY))
                 .is_some();
-            Ok(Box::new(app::OverlayApp::new(rx, open, !remembered)))
+            let minimap = cc
+                .storage
+                .and_then(|s| s.get_string(minimap_view::STORAGE_KEY))
+                .and_then(|raw| minimap::Placement::parse(&raw));
+            Ok(Box::new(app::OverlayApp::new(
+                rx,
+                open,
+                !remembered,
+                minimap,
+            )))
         }),
     )
     .map_err(|e| e.to_string())

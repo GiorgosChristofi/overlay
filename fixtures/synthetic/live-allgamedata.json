@@ -28,6 +28,14 @@
       ]
     }
   ],
-  "events": { "Events": [{ "EventID": 0, "EventName": "GameStart", "EventTime": 0.05 }] },
+  "events": {
+    "Events": [
+      { "EventID": 0, "EventName": "GameStart", "EventTime": 0.05 },
+      { "EventID": 1, "EventName": "ChampionKill", "EventTime": 201.3, "KillerName": "Enemy", "VictimName": "Tester" },
+      { "EventID": 2, "EventName": "DragonKill", "EventTime": 362.75, "DragonType": "Fire", "Stolen": "False", "KillerName": "Tester", "Assisters": [] },
+      { "EventID": 3, "EventName": "HordeKill", "EventTime": 489.1, "KillerName": "Enemy", "Assisters": [] },
+      { "EventID": 4, "EventName": "DragonKill", "EventTime": 605.5, "DragonType": "Water", "Stolen": "True", "KillerName": "Enemy", "Assisters": [] }
+    ]
+  },
   "gameData": { "gameMode": "CLASSIC", "gameTime": 612.4 }
 }

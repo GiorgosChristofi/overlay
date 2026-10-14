@@ -5,6 +5,7 @@ use crate::builds::Build;
 use crate::champ_select::{ChampSelectSession, ChampionPick};
 use crate::error::PortError;
 use crate::item_set::ItemSet;
+use crate::objectives::ObjectiveKill;
 use crate::phase::GameflowPhase;
 use crate::runes::{ExistingPage, NewRunePage};
 use crate::summoner::Summoner;
@@ -55,6 +56,12 @@ pub struct LiveSnapshot {
     pub gold: u32,
     /// Items held right now: item id and count.
     pub inventory: Vec<(i64, u32)>,
+    /// The game clock (`gameData.gameTime`) when this was read.
+    pub game_time_ms: u64,
+    /// A Summoner's Rift game (`CLASSIC`), the only map with these pits.
+    pub summoners_rift: bool,
+    /// Dragons, Elders and Barons slain so far, by either team.
+    pub objective_kills: Vec<ObjectiveKill>,
 }
 
 /// Reads the running game.

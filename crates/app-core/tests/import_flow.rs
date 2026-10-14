@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use domain::builds::{BlockKind, Build, BuildCatalog, ItemBlock, PickStats, RunePageOption};
 use domain::champ_select::{Action, ChampSelectSession, ChampionPick, Role, TeamMember};
 use domain::item_set::ItemSet;
+use domain::objectives::{KillKind, ObjectiveKill, Team};
 use domain::phase::GameflowPhase;
 use domain::ports::LiveSnapshot;
 use domain::ports::{BuildSource, LcuEvent, LcuPort};
@@ -16,8 +17,8 @@ use domain::static_catalog::{ItemInfo, RuneTree, StaticCatalog};
 use domain::summoner::Summoner;
 use domain::PortError;
 use ipc_types::{
-    ImportReportDto, OverlayBlockKind, OverlayCommand, OverlayMessage, SessionStateDto, StatusDto,
-    StepResultDto,
+    ImportReportDto, ObjectiveTimerDto, ObjectiveTimersDto, OverlayBlockKind, OverlayCommand,
+    OverlayMessage, PitDto, SessionStateDto, StatusDto, StepResultDto,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -1015,6 +1016,7 @@ async fn bought_items_leave_the_overlay_and_unchanged_ticks_send_nothing() {
     let snapshot = LiveSnapshot {
         gold: 100,
         inventory: vec![(1056, 1), (3340, 1)],
+        ..Default::default()
     };
     h.core.live_tick(Some(snapshot.clone()));
     assert_eq!(h.overlay_items(), [(OverlayBlockKind::Starter, vec![2003])]);
@@ -1026,10 +1028,12 @@ async fn bought_items_leave_the_overlay_and_unchanged_ticks_send_nothing() {
     h.core.live_tick(Some(LiveSnapshot {
         gold: 150,
         inventory: vec![(2003, 1)],
+        ..Default::default()
     }));
     h.core.live_tick(Some(LiveSnapshot {
         gold: 200,
         inventory: vec![(1056, 1)],
+        ..Default::default()
     }));
     assert_eq!(h.overlay_items(), []);
 }
@@ -1053,6 +1057,7 @@ async fn a_new_game_forgets_what_was_bought_and_disconnect_clears_the_overlay() 
     h.core.live_tick(Some(LiveSnapshot {
         gold: 0,
         inventory: vec![(1056, 1)],
+        ..Default::default()
     }));
     h.core
         .handle(LcuEvent::Phase(GameflowPhase::EndOfGame))
@@ -1184,6 +1189,7 @@ async fn a_late_read_after_the_game_ended_changes_nothing() {
     h.core.live_tick(Some(LiveSnapshot {
         gold: 500,
         inventory: vec![(1056, 1)],
+        ..Default::default()
     }));
     assert_eq!(
         h.overlay_items(),
@@ -1193,4 +1199,93 @@ async fn a_late_read_after_the_game_ended_changes_nothing() {
         OverlayMessage::Items(view) => assert_eq!(view.gold, None),
         other => panic!("expected items, got {other:?}"),
     }
+}
+
+fn objective_messages(h: &Harness) -> Vec<Option<ObjectiveTimersDto>> {
+    h.overlays()
+        .into_iter()
+        .filter_map(|m| match m {
+            OverlayMessage::Objectives(timers) => Some(timers),
+            _ => None,
+        })
+        .collect()
+}
+
+fn in_rift_game(game_time_ms: u64, objective_kills: Vec<ObjectiveKill>) -> LiveSnapshot {
+    LiveSnapshot {
+        game_time_ms,
+        summoners_rift: true,
+        objective_kills,
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn objective_timers_follow_the_game_clock_and_stop_when_the_game_ends() {
+    let h = harness(FakeLcu::default(), Settings::default());
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::InProgress))
+        .await;
+
+    // 6:30, a dragon slain at 6:02.4 by the blue side.
+    let dragon = ObjectiveKill {
+        at_ms: 362_400,
+        kind: KillKind::Dragon,
+        team: Some(Team::Order),
+    };
+    h.core.live_tick(Some(in_rift_game(390_000, vec![dragon])));
+    let timer = |pit, label: &str, spawn_at_ms| ObjectiveTimerDto {
+        pit,
+        label: label.into(),
+        spawn_at_ms,
+    };
+    assert_eq!(
+        objective_messages(&h).last(),
+        Some(&Some(ObjectiveTimersDto {
+            game_time_ms: 390_000,
+            timers: vec![
+                timer(PitDto::Dragon, "Dragon", 662_400),
+                timer(PitDto::Baron, "Grubs", 480_000),
+            ],
+        }))
+    );
+
+    // Each read moves the clock, so each one is sent; spawn times stay put.
+    h.core.live_tick(Some(in_rift_game(391_000, vec![dragon])));
+    let sent = objective_messages(&h);
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1].as_ref().unwrap().game_time_ms, 391_000);
+    assert_eq!(
+        sent[1].as_ref().unwrap().timers,
+        sent[0].as_ref().unwrap().timers
+    );
+
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::EndOfGame))
+        .await;
+    assert_eq!(objective_messages(&h).last(), Some(&None), "cleared once");
+    let count = objective_messages(&h).len();
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::WaitingForStats))
+        .await;
+    assert_eq!(objective_messages(&h).len(), count, "not repeated");
+}
+
+#[tokio::test]
+async fn no_objective_timers_outside_summoners_rift() {
+    let h = harness(FakeLcu::default(), Settings::default());
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::InProgress))
+        .await;
+    h.core.live_tick(Some(LiveSnapshot {
+        game_time_ms: 600_000,
+        summoners_rift: false,
+        ..Default::default()
+    }));
+    assert_eq!(
+        objective_messages(&h),
+        Vec::<Option<ObjectiveTimersDto>>::new()
+    );
 }

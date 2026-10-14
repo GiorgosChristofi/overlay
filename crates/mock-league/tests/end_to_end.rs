@@ -157,11 +157,20 @@ impl App {
         self.sink.imports.lock().unwrap().clone()
     }
 
+    /// The latest item view (objective timers arrive in between).
     fn last_view(&self) -> Option<ipc_types::OverlayViewDto> {
-        match self.sink.overlays.lock().unwrap().last() {
-            Some(OverlayMessage::Items(view)) => Some((**view).clone()),
-            _ => None,
-        }
+        self.sink
+            .overlays
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find_map(|m| match m {
+                OverlayMessage::Items(view) => Some(Some((**view).clone())),
+                OverlayMessage::Clear => Some(None),
+                OverlayMessage::Objectives(_) => None,
+            })
+            .flatten()
     }
 
     async fn view_until(
@@ -495,4 +504,117 @@ async fn bundled_scenarios_play_through_cleanly() {
         }
     }
     assert!(count > 0, "no scenarios in {dir}");
+}
+
+impl App {
+    fn last_objectives(&self) -> Option<Option<ipc_types::ObjectiveTimersDto>> {
+        self.sink
+            .overlays
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find_map(|m| match m {
+                OverlayMessage::Objectives(timers) => Some(timers.clone()),
+                _ => None,
+            })
+    }
+
+    async fn objectives_until(
+        &self,
+        what: &str,
+        check: impl Fn(&Option<ipc_types::ObjectiveTimersDto>) -> bool,
+    ) -> Option<ipc_types::ObjectiveTimersDto> {
+        let deadline = tokio::time::Instant::now() + WAIT;
+        loop {
+            if let Some(timers) = self.last_objectives().filter(|t| check(t)) {
+                return timers;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for {what}; last: {:#?}",
+                self.last_objectives()
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn objective_timers_reach_the_overlay_from_the_games_own_events() {
+    use ipc_types::{ObjectiveTimerDto, PitDto};
+    let app = App::start(Setup::default(), Settings::default()).await;
+    app.connected().await;
+    app.mock.run(&[Step::Phase("InProgress".into())]).await;
+
+    // 6:30 into the game; the blue side (the local player, by game name)
+    // took the first dragon at 6:02.4.
+    let dragon = serde_json::json!({ "EventName": "DragonKill", "EventTime": 362.4,
+        "DragonType": "Fire", "Stolen": "False", "KillerName": "Tester" });
+    app.mock.apply(&Step::Live(LiveStep {
+        game_time: 390.0,
+        events: vec![dragon.clone()],
+        ..LiveStep::default()
+    }));
+    let timers = app
+        .objectives_until("the dragon timer", |t| {
+            t.as_ref().is_some_and(|t| t.game_time_ms == 390_000)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        timers.timers,
+        [
+            ObjectiveTimerDto {
+                pit: PitDto::Dragon,
+                label: "Dragon".into(),
+                spawn_at_ms: 662_400
+            },
+            ObjectiveTimerDto {
+                pit: PitDto::Baron,
+                label: "Grubs".into(),
+                spawn_at_ms: 480_000
+            },
+        ]
+    );
+
+    // 25:10: the red side's Baron at 25:00 comes back at 31:00.
+    let baron = serde_json::json!({ "EventName": "BaronKill", "EventTime": 1500.0,
+        "KillerName": "Enemy" });
+    app.mock.apply(&Step::Live(LiveStep {
+        game_time: 1510.0,
+        events: vec![dragon, baron],
+        ..LiveStep::default()
+    }));
+    let timers = app
+        .objectives_until("the baron timer", |t| {
+            t.as_ref().is_some_and(|t| t.game_time_ms == 1_510_000)
+        })
+        .await
+        .unwrap();
+    assert!(timers.timers.contains(&ObjectiveTimerDto {
+        pit: PitDto::Baron,
+        label: "Baron".into(),
+        spawn_at_ms: 1_860_000
+    }));
+
+    app.mock.apply(&Step::Phase("EndOfGame".into()));
+    app.objectives_until("the timers to clear", Option::is_none)
+        .await;
+}
+
+#[tokio::test]
+async fn an_aram_game_gets_no_objective_timers() {
+    let app = App::start(Setup::default(), Settings::default()).await;
+    app.connected().await;
+    app.mock.run(&[Step::Phase("InProgress".into())]).await;
+    app.mock.apply(&Step::Live(LiveStep {
+        gold: 777.0,
+        game_time: 600.0,
+        game_mode: "ARAM".into(),
+        ..LiveStep::default()
+    }));
+    // Live reads are flowing (gold arrives), yet no timers are sent.
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert_eq!(app.last_objectives(), None);
 }

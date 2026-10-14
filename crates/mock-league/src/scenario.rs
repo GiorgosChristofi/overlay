@@ -195,6 +195,10 @@ pub struct LiveStep {
     pub level: u32,
     /// `ARAM` or `CLASSIC`.
     pub game_mode: String,
+    /// Game events after `GameStart`, as the API lists them, e.g.
+    /// `{ "EventName": "DragonKill", "EventTime": 362.4, "DragonType": "Fire",
+    /// "KillerName": "Tester" }`. Every step lists all events so far.
+    pub events: Vec<Value>,
 }
 
 impl Default for LiveStep {
@@ -206,6 +210,7 @@ impl Default for LiveStep {
             game_time: 0.0,
             level: 1,
             game_mode: "CLASSIC".into(),
+            events: Vec::new(),
         }
     }
 }
@@ -218,6 +223,17 @@ impl LiveStep {
             .enumerate()
             .map(|(slot, (id, count))| json!({ "itemID": id, "count": count, "slot": slot, "price": 0, "displayName": "" }))
             .collect();
+        let events: Vec<Value> =
+            std::iter::once(json!({ "EventName": "GameStart", "EventTime": 0.0 }))
+                .chain(self.events.iter().cloned())
+                .enumerate()
+                .map(|(id, mut event)| {
+                    if let Some(fields) = event.as_object_mut() {
+                        fields.insert("EventID".into(), json!(id));
+                    }
+                    event
+                })
+                .collect();
         json!({
             "activePlayer": {
                 "currentGold": self.gold,
@@ -231,7 +247,7 @@ impl LiveStep {
                 { "championName": "Garen", "riotId": "Enemy#EUW", "summonerName": "Enemy#EUW", "team": "CHAOS", "level": 1,
                   "items": [{ "itemID": 1055, "count": 1, "slot": 0 }] },
             ],
-            "events": { "Events": [{ "EventID": 0, "EventName": "GameStart", "EventTime": 0.0 }] },
+            "events": { "Events": events },
             "gameData": { "gameMode": self.game_mode, "gameTime": self.game_time },
         })
     }

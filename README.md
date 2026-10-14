@@ -157,6 +157,8 @@ the next epic monster spawns in each pit:
   **Elder** 6:00 after a team's fourth dragon and 6:00 after each Elder.
 - **Baron pit:** Voidgrubs (8:00), then Rift Herald (15:00), then Baron
   (20:00), then 6:00 after each Baron.
+- **River Scuttlers:** their first spawn (2:55) only; their kills are not
+  reported, so there is no respawn timer.
 
 They are automatic for both teams: the times come from the game's own
 `DragonKill` and `BaronKill` events and its clock (`gameData.gameTime`),

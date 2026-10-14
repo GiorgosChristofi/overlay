@@ -252,6 +252,10 @@ pub enum PitDto {
     Dragon,
     /// Top river: Voidgrubs, Herald, Baron.
     Baron,
+    /// The River Scuttler on the Baron side (first spawn only).
+    ScuttleTop,
+    /// The River Scuttler on the Dragon side (first spawn only).
+    ScuttleBottom,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -58,8 +58,10 @@ traps in this Windows dev environment.
   modes: `CLASSIC` and `PRACTICETOOL` on map 11 (`live.rs`; the mode is
   logged once per game). A clock that steps back >5 s is a Practice Tool
   reset: kills seen before it no longer count (the game may keep or clear
-  its event list) and purchases start over. Normal
-  camps cannot be timed: the public API does not report them; Porofessor
+  its event list) and purchases start over. Scuttlers get only their
+  fixed first spawn (2:55; their spots in `minimap.rs` are community
+  coordinates); overlapping labels are nudged apart (`minimap_view.rs`).
+  Other normal camps cannot be timed: the public API does not report them; Porofessor
   gets them from Overwolf's own `jungle_camps` game events.
 - IPC DTOs live in `ipc-types`; `cargo test` regenerates `ui/src/bindings`
   (ts-rs). CI fails if bindings are stale, so commit them. Overlay DTOs are

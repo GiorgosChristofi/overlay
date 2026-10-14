@@ -652,6 +652,27 @@ async fn the_practice_tool_gets_timers_that_follow_fast_forward_and_reset() {
         .objectives_until("practice tool timers", at(20_000))
         .await;
     assert_eq!(dragon_at(&t), Some(300_000));
+    // Both River Scuttlers count down to their first spawn at 2:55.
+    let scuttles: Vec<(ipc_types::PitDto, u64)> = t
+        .as_ref()
+        .unwrap()
+        .timers
+        .iter()
+        .filter(|t| {
+            matches!(
+                t.pit,
+                ipc_types::PitDto::ScuttleTop | ipc_types::PitDto::ScuttleBottom
+            )
+        })
+        .map(|t| (t.pit, t.spawn_at_ms))
+        .collect();
+    assert_eq!(
+        scuttles,
+        [
+            (ipc_types::PitDto::ScuttleTop, 175_000),
+            (ipc_types::PitDto::ScuttleBottom, 175_000)
+        ]
+    );
 
     // Fast-forward to 6:30 and slay the dragon at 6:02.4.
     let dragon = serde_json::json!({ "EventName": "DragonKill", "EventTime": 362.4,

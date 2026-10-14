@@ -125,6 +125,8 @@ impl State {
                 pit: match u.pit {
                     Pit::Dragon => PitDto::Dragon,
                     Pit::Baron => PitDto::Baron,
+                    Pit::ScuttleTop => PitDto::ScuttleTop,
+                    Pit::ScuttleBottom => PitDto::ScuttleBottom,
                 },
                 label: u.monster.label().to_owned(),
                 spawn_at_ms: u.spawn_at_ms,

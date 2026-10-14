@@ -88,8 +88,9 @@ impl MinimapLayer {
             MinimapMode::Timers => {}
             MinimapMode::Adjust => self.adjust(ui, map),
         }
+        let mut drawn: Vec<Rect> = Vec::with_capacity(shown.len());
         for timer in shown {
-            draw_timer(ui, map, timer);
+            drawn.push(draw_timer(ui, map, timer, &drawn));
         }
     }
 
@@ -183,13 +184,20 @@ fn at_pit(map: Rect, pit: PitDto) -> Pos2 {
 }
 
 /// The countdown, centred on its pit (the minimap's own icon says what spawns).
-fn draw_timer(ui: &Ui, map: Rect, timer: &Shown) {
+/// Returns where it was drawn; it is moved clear of the timers in `drawn`.
+fn draw_timer(ui: &Ui, map: Rect, timer: &Shown, drawn: &[Rect]) -> Rect {
     let painter = ui.painter();
-    let at = at_pit(map, timer.pit);
     // Scale with the minimap so a large one is not cluttered with tiny text.
     let scale = (map.width() / 280.0).clamp(0.8, 1.6);
     let time = painter.layout_no_wrap(timer.time.clone(), FontId::monospace(13.0 * scale), TEXT);
-    let bg = Rect::from_center_size(at, time.size() + Vec2::new(8.0, 2.0) * scale);
+    let bg = clear_of(
+        Rect::from_center_size(
+            at_pit(map, timer.pit),
+            time.size() + Vec2::new(8.0, 2.0) * scale,
+        ),
+        drawn,
+    );
+    let at = bg.center();
     painter.rect_filled(bg, CornerRadius::same(4), Color32::from_black_alpha(190));
     painter.rect_stroke(
         bg,
@@ -198,4 +206,53 @@ fn draw_timer(ui: &Ui, map: Rect, timer: &Shown) {
         StrokeKind::Inside,
     );
     painter.galley(at - time.size() / 2.0, time, TEXT);
+    bg
+}
+
+/// Moves `label` away from any box in `others` it overlaps, a point at a
+/// time, so a Scuttler's countdown next to its pit's stays readable.
+fn clear_of(label: Rect, others: &[Rect]) -> Rect {
+    let mut label = label;
+    // A label is at most a few dozen points wide; this bound only guards
+    // against a loop that cannot clear (e.g. identical centres).
+    for _ in 0..80 {
+        let Some(other) = others.iter().find(|o| o.intersects(label)) else {
+            break;
+        };
+        let away = label.center() - other.center();
+        let step = if away.length() < 0.5 {
+            Vec2::Y
+        } else {
+            away.normalized()
+        };
+        label = label.translate(step);
+    }
+    label
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_label_that_overlaps_another_moves_away_until_clear() {
+        let pit = Rect::from_center_size(Pos2::new(100.0, 100.0), Vec2::new(40.0, 18.0));
+        // Below and to the left, overlapping (like the top Scuttler and Baron).
+        let scuttle = Rect::from_center_size(Pos2::new(89.0, 116.0), Vec2::new(40.0, 18.0));
+        let moved = clear_of(scuttle, &[pit]);
+        assert!(!moved.intersects(pit));
+        assert!(moved.center().y > scuttle.center().y && moved.center().x < scuttle.center().x);
+        assert!(
+            moved.center().distance(scuttle.center()) < 10.0,
+            "moved only a little"
+        );
+    }
+
+    #[test]
+    fn a_label_already_clear_stays_put_and_identical_centres_still_separate() {
+        let a = Rect::from_center_size(Pos2::new(0.0, 0.0), Vec2::new(40.0, 18.0));
+        let far = a.translate(Vec2::new(100.0, 0.0));
+        assert_eq!(clear_of(far, &[a]), far);
+        assert!(!clear_of(a, &[a]).intersects(a));
+    }
 }

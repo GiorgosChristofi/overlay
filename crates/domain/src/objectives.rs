@@ -3,7 +3,8 @@
 //!
 //! Only what the Live Client Data API states exactly is used: the game time
 //! and `DragonKill` / `BaronKill` events. Normal camps are not reported by
-//! that API, so they are not timed here.
+//! that API, so they are not timed here; the one exception is the River
+//! Scuttlers' first spawn, which is at a fixed time for everyone.
 //!
 //! All times are game time in milliseconds (`gameData.gameTime`), never the
 //! PC clock, so pauses and slow polls cannot shift a timer.
@@ -25,6 +26,9 @@ pub const HERALD_SPAWN_MS: u64 = 15 * 60_000;
 /// Baron (20:00 since 26.1).
 pub const BARON_FIRST_SPAWN_MS: u64 = 20 * 60_000;
 pub const BARON_RESPAWN_MS: u64 = 6 * 60_000;
+/// Both River Scuttlers' first spawn (2:55 since 26.1). Their kills are not
+/// reported, so there is no timer after this one.
+pub const SCUTTLE_FIRST_SPAWN_MS: u64 = 2 * 60_000 + 55_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Team {
@@ -63,13 +67,17 @@ pub enum KillKind {
     Baron,
 }
 
-/// The two pits that hold epic monsters.
+/// Where a timer belongs: the two epic pits and the two Scuttler spots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Pit {
     /// Bottom river: dragons, then Elder.
     Dragon,
     /// Top river: Voidgrubs, then Herald, then Baron.
     Baron,
+    /// The River Scuttler in the top half of the river (Baron side).
+    ScuttleTop,
+    /// The River Scuttler in the bottom half (Dragon side).
+    ScuttleBottom,
 }
 
 /// What spawns next in a pit.
@@ -80,6 +88,7 @@ pub enum Monster {
     Voidgrubs,
     Herald,
     Baron,
+    Scuttle,
 }
 
 impl Monster {
@@ -90,6 +99,7 @@ impl Monster {
             Self::Voidgrubs => "Grubs",
             Self::Herald => "Herald",
             Self::Baron => "Baron",
+            Self::Scuttle => "Scuttle",
         }
     }
 }
@@ -110,9 +120,16 @@ pub struct Upcoming {
 pub fn upcoming(kills: &[ObjectiveKill], now_ms: u64) -> Vec<Upcoming> {
     let mut kills: Vec<&ObjectiveKill> = kills.iter().filter(|k| k.at_ms <= now_ms).collect();
     kills.sort_by_key(|k| k.at_ms);
+    let scuttle = |pit| Upcoming {
+        pit,
+        monster: Monster::Scuttle,
+        spawn_at_ms: SCUTTLE_FIRST_SPAWN_MS,
+    };
     [
         next_in_dragon_pit(&kills),
         next_in_baron_pit(&kills, now_ms),
+        scuttle(Pit::ScuttleTop),
+        scuttle(Pit::ScuttleBottom),
     ]
     .into_iter()
     .filter(|u| u.spawn_at_ms > now_ms)
@@ -227,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn at_the_start_the_first_dragon_and_the_grubs_count_down() {
+    fn at_the_start_the_first_dragon_the_grubs_and_both_scuttlers_count_down() {
         let next = upcoming(&[], 90_000);
         assert_eq!(
             next,
@@ -242,8 +259,31 @@ mod tests {
                     monster: Monster::Voidgrubs,
                     spawn_at_ms: 8 * MIN
                 },
+                Upcoming {
+                    pit: Pit::ScuttleTop,
+                    monster: Monster::Scuttle,
+                    spawn_at_ms: 175_000
+                },
+                Upcoming {
+                    pit: Pit::ScuttleBottom,
+                    monster: Monster::Scuttle,
+                    spawn_at_ms: 175_000
+                },
             ]
         );
+    }
+
+    #[test]
+    fn scuttlers_only_count_down_to_their_first_spawn() {
+        let scuttles = |now| {
+            upcoming(&[], now)
+                .iter()
+                .filter(|u| u.monster == Monster::Scuttle)
+                .count()
+        };
+        assert_eq!(scuttles(174_999), 2);
+        assert_eq!(scuttles(175_000), 0, "up at 2:55");
+        assert_eq!(scuttles(20 * MIN), 0, "their kills are not reported");
     }
 
     #[test]
@@ -419,7 +459,7 @@ mod tests {
             now in 0u64..60 * MIN,
         ) {
             let next = upcoming(&kills, now);
-            prop_assert!(next.len() <= 2);
+            prop_assert!(next.len() <= 4);
             prop_assert!(next.iter().filter(|u| u.pit == Pit::Dragon).count() <= 1);
             for u in &next {
                 prop_assert!(u.spawn_at_ms > now);

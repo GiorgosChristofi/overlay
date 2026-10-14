@@ -12,6 +12,11 @@ const MAP_MAX: (f32, f32) = (14870.0, 14980.0);
 /// Centre of each pit, in game units.
 const BARON_PIT: (f32, f32) = (5007.0, 10471.0);
 const DRAGON_PIT: (f32, f32) = (9866.0, 4414.0);
+/// Where each River Scuttler spawns, in game units. Community-sourced, not
+/// published by Riot: within a few pixels on the minimap, which is all a
+/// countdown label needs.
+const SCUTTLE_TOP: (f32, f32) = (4400.0, 9600.0);
+const SCUTTLE_BOTTOM: (f32, f32) = (10500.0, 5170.0);
 
 /// The game clock is read about once a second; between reads the overlay
 /// counts on by itself, but never further than this past the last read, so
@@ -24,6 +29,8 @@ pub fn pit_position(pit: PitDto) -> (f32, f32) {
     let (x, y) = match pit {
         PitDto::Baron => BARON_PIT,
         PitDto::Dragon => DRAGON_PIT,
+        PitDto::ScuttleTop => SCUTTLE_TOP,
+        PitDto::ScuttleBottom => SCUTTLE_BOTTOM,
     };
     (
         (x - MAP_MIN.0) / (MAP_MAX.0 - MAP_MIN.0),
@@ -163,6 +170,26 @@ mod tests {
         // at these same points, so a fitted frame puts timers on the pits.
         assert!((bx + dx - 1.0).abs() < 0.01, "{}", bx + dx);
         assert!((by + dy - 1.0).abs() < 0.01, "{}", by + dy);
+    }
+
+    #[test]
+    fn the_scuttlers_sit_in_the_river_beside_their_pit() {
+        let near =
+            |a: (f32, f32), b: (f32, f32)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
+        let (top, bottom) = (
+            pit_position(PitDto::ScuttleTop),
+            pit_position(PitDto::ScuttleBottom),
+        );
+        // Each is closer to its own pit than to the other one, and the two
+        // mirror each other through the map centre as the pits do (within
+        // 1%, under 3 pixels on a 280-point minimap).
+        assert!(near(top, pit_position(PitDto::Baron)) < near(top, pit_position(PitDto::Dragon)));
+        assert!(
+            near(bottom, pit_position(PitDto::Dragon)) < near(bottom, pit_position(PitDto::Baron))
+        );
+        let (baron, dragon) = (pit_position(PitDto::Baron), pit_position(PitDto::Dragon));
+        assert!((top.0 + bottom.0 - (baron.0 + dragon.0)).abs() < 0.01);
+        assert!((top.1 + bottom.1 - (baron.1 + dragon.1)).abs() < 0.01);
     }
 
     #[test]

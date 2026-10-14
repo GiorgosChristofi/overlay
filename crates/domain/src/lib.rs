@@ -7,6 +7,7 @@ pub mod builds;
 pub mod champ_select;
 pub mod error;
 pub mod item_set;
+pub mod objectives;
 pub mod phase;
 pub mod ports;
 pub mod runes;

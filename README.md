@@ -148,6 +148,37 @@ only shows while the game window is focused. The column shows:
   "automatic", to undo); click its **×** to take it off the list ("Restore"
   at the bottom brings removed items back). Choices last for the game.
 
+### Objective timers on the minimap
+
+On Summoner's Rift, a second transparent layer over the minimap shows when
+the next epic monster spawns in each pit:
+
+- **Dragon pit:** the first dragon (5:00), then 5:00 after each kill;
+  **Elder** 6:00 after a team's fourth dragon and 6:00 after each Elder.
+- **Baron pit:** Voidgrubs (8:00), then Rift Herald (15:00), then Baron
+  (20:00), then 6:00 after each Baron.
+- **River Scuttlers:** their first spawn (2:55) only; their kills are not
+  reported, so there is no respawn timer.
+
+They are automatic for both teams: the times come from the game's own
+`DragonKill` and `BaronKill` events and its clock (`gameData.gameTime`),
+never your PC's clock, so pauses and slow reads cannot shift them. A pit
+whose monster is up shows nothing. They run in every Summoner's Rift queue
+and in the Practice Tool, where fast-forwarding moves them with the clock and
+**Reset Game** starts them (and the bought items) over; other modes on the
+Rift, like URF, change the timings and get none. Normal camps (buffs, Gromp, wolves,
+raptors, krugs, Scuttle) are not timed: the public API does not report
+them, and reading the screen or game memory is not allowed.
+
+**Fit it once:** open the column (P) and the layer shows a frame over the
+bottom-right corner. Drag it onto your minimap, resize it from its corner,
+and put its two circles on the Baron and Dragon pits. It is remembered.
+While the column is open the frame catches clicks on the minimap; close the
+column and clicks go to the game again.
+
+The timings are constants in `crates/domain/src/objectives.rs` (as of
+patch 26.1); change them there when Riot does.
+
 How it works: the desktop app starts a second process of itself
 (`desktop --overlay`, egui) and sends it the view as JSON lines. It reads
 gold and items once a second from Riot's Live Client Data API

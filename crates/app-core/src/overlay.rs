@@ -335,6 +335,7 @@ mod tests {
         let live = LiveSnapshot {
             gold: 500,
             inventory: vec![(3340, 1)],
+            ..Default::default()
         };
         let v = view(&Purchases::default(), Some(&live));
         assert!(v.starting.unwrap().affordable);
@@ -345,6 +346,7 @@ mod tests {
         let live = LiveSnapshot {
             gold: 900,
             inventory: vec![(1056, 1), (1001, 1)],
+            ..Default::default()
         };
         let mut purchases = Purchases::default();
         purchases.observe(&live.inventory);

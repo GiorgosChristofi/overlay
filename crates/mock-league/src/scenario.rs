@@ -193,8 +193,14 @@ pub struct LiveStep {
     pub champion_name: String,
     pub game_time: f64,
     pub level: u32,
-    /// `ARAM` or `CLASSIC`.
+    /// `CLASSIC`, `PRACTICETOOL`, `ARAM`, ...
     pub game_mode: String,
+    /// 11 is Summoner's Rift, 12 Howling Abyss (ARAM).
+    pub map_number: u32,
+    /// Game events after `GameStart`, as the API lists them, e.g.
+    /// `{ "EventName": "DragonKill", "EventTime": 362.4, "DragonType": "Fire",
+    /// "KillerName": "Tester" }`. Every step lists all events so far.
+    pub events: Vec<Value>,
 }
 
 impl Default for LiveStep {
@@ -206,6 +212,8 @@ impl Default for LiveStep {
             game_time: 0.0,
             level: 1,
             game_mode: "CLASSIC".into(),
+            map_number: 11,
+            events: Vec::new(),
         }
     }
 }
@@ -218,6 +226,17 @@ impl LiveStep {
             .enumerate()
             .map(|(slot, (id, count))| json!({ "itemID": id, "count": count, "slot": slot, "price": 0, "displayName": "" }))
             .collect();
+        let events: Vec<Value> =
+            std::iter::once(json!({ "EventName": "GameStart", "EventTime": 0.0 }))
+                .chain(self.events.iter().cloned())
+                .enumerate()
+                .map(|(id, mut event)| {
+                    if let Some(fields) = event.as_object_mut() {
+                        fields.insert("EventID".into(), json!(id));
+                    }
+                    event
+                })
+                .collect();
         json!({
             "activePlayer": {
                 "currentGold": self.gold,
@@ -231,8 +250,8 @@ impl LiveStep {
                 { "championName": "Garen", "riotId": "Enemy#EUW", "summonerName": "Enemy#EUW", "team": "CHAOS", "level": 1,
                   "items": [{ "itemID": 1055, "count": 1, "slot": 0 }] },
             ],
-            "events": { "Events": [{ "EventID": 0, "EventName": "GameStart", "EventTime": 0.0 }] },
-            "gameData": { "gameMode": self.game_mode, "gameTime": self.game_time },
+            "events": { "Events": events },
+            "gameData": { "gameMode": self.game_mode, "mapNumber": self.map_number, "gameTime": self.game_time },
         })
     }
 }

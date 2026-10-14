@@ -7,6 +7,7 @@ use crate::overlay::{overlay_view, OverlayChoices, OverlayInputs};
 use crate::settings_store::{SettingsError, SettingsStore};
 use domain::builds::Build;
 use domain::champ_select::{selected_pick, ChampionPick, GameMode};
+use domain::objectives::{self, ObjectiveKill, Pit};
 use domain::ports::{BuildSource, LcuEvent, LcuPort, LiveSnapshot};
 use domain::session::{transition, SessionEvent, SessionState};
 use domain::settings::Settings;
@@ -14,8 +15,8 @@ use domain::shopping::Purchases;
 use domain::static_catalog::StaticCatalog;
 use domain::summoner::Summoner;
 use ipc_types::{
-    ImportReportDto, OverlayCommand, OverlayMessage, RuneCatalogDto, RuneDto, RuneTreeDto,
-    SessionStateDto, StatusDto, SummonerDto,
+    ImportReportDto, ObjectiveTimerDto, ObjectiveTimersDto, OverlayCommand, OverlayMessage, PitDto,
+    RuneCatalogDto, RuneDto, RuneTreeDto, SessionStateDto, StatusDto, SummonerDto,
 };
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -84,6 +85,32 @@ struct State {
     live: Option<LiveSnapshot>,
     /// Last view sent to the overlay, to send only changes.
     last_overlay: Option<OverlayMessage>,
+    /// Last objective timers sent to the overlay, to send only changes.
+    last_objectives: Option<ObjectiveTimersDto>,
+    /// Kills from before a Practice Tool reset, which no longer count.
+    kills_before_reset: Vec<ObjectiveKill>,
+    /// The last read that had game data. Kept through reads without any
+    /// (a reset reloads the game, which answers nothing for a moment), so
+    /// the read after can still be compared with the one before.
+    last_read: Option<LastRead>,
+}
+
+#[derive(Debug, Clone)]
+struct LastRead {
+    game_time_ms: u64,
+    event_count: u32,
+    kills: Vec<ObjectiveKill>,
+}
+
+/// Why a read counts as a Practice Tool "Reset Game", if it does.
+fn reset_reason(before: &LastRead, now: &LiveSnapshot) -> Option<&'static str> {
+    if objectives::is_reset(before.game_time_ms, now.game_time_ms) {
+        Some("the game clock went back")
+    } else if now.event_count < before.event_count {
+        Some("the game's event list was cleared")
+    } else {
+        None
+    }
 }
 
 impl State {
@@ -106,9 +133,35 @@ impl State {
         })))
     }
 
+    /// Epic objective timers, from the latest read of a Summoner's Rift game.
+    fn objective_timers(&self) -> Option<ObjectiveTimersDto> {
+        let live = self.live.as_ref().filter(|l| l.summoners_rift)?;
+        Some(ObjectiveTimersDto {
+            game_time_ms: live.game_time_ms,
+            timers: objectives::upcoming(
+                &objectives::since_reset(&live.objective_kills, &self.kills_before_reset),
+                live.game_time_ms,
+            )
+            .into_iter()
+            .map(|u| ObjectiveTimerDto {
+                pit: match u.pit {
+                    Pit::Dragon => PitDto::Dragon,
+                    Pit::Baron => PitDto::Baron,
+                    Pit::ScuttleTop => PitDto::ScuttleTop,
+                    Pit::ScuttleBottom => PitDto::ScuttleBottom,
+                },
+                label: u.monster.label().to_owned(),
+                spawn_at_ms: u.spawn_at_ms,
+            })
+            .collect(),
+        })
+    }
+
     /// A new game (or none): forget what was bought.
     fn reset_game(&mut self) {
         self.purchases = Purchases::default();
+        self.kills_before_reset.clear();
+        self.last_read = None;
         self.choices = OverlayChoices::default();
         self.live = None;
     }
@@ -149,6 +202,9 @@ impl Core {
                 choices: OverlayChoices::default(),
                 live: None,
                 last_overlay: None,
+                last_objectives: None,
+                kills_before_reset: Vec::new(),
+                last_read: None,
             }),
             sources,
             settings_store,
@@ -256,6 +312,23 @@ impl Core {
         if let Some(message) = changed {
             self.sink.overlay(&message);
         }
+        self.publish_objectives();
+    }
+
+    /// Sends the objective timers when they changed (in game: every read,
+    /// as the clock moves), and `None` once when the game is gone.
+    fn publish_objectives(&self) {
+        let changed = {
+            let mut s = self.lock();
+            let timers = s.objective_timers();
+            (s.last_objectives != timers).then(|| {
+                s.last_objectives.clone_from(&timers);
+                timers
+            })
+        };
+        if let Some(timers) = changed {
+            self.sink.overlay(&OverlayMessage::Objectives(timers));
+        }
     }
 
     /// Something the player did in the column (chose or removed an item).
@@ -274,7 +347,45 @@ impl Core {
                 return;
             }
             if let Some(snap) = &snapshot {
+                // The Practice Tool's "Reset Game" turns the clock back: what
+                // happened before no longer counts. (Fast-forward only moves
+                // it on, which the timers follow by themselves.)
+                let reset = s
+                    .last_read
+                    .as_ref()
+                    .and_then(|before| Some((reset_reason(before, snap)?, before.clone())));
+                if let Some((reason, before)) = reset {
+                    tracing::info!(
+                        reason,
+                        from_ms = before.game_time_ms,
+                        to_ms = snap.game_time_ms,
+                        events_before = before.event_count,
+                        events_now = snap.event_count,
+                        "game reset"
+                    );
+                    for kill in before.kills.iter().chain(&snap.objective_kills) {
+                        if !s.kills_before_reset.contains(kill) {
+                            s.kills_before_reset.push(*kill);
+                        }
+                    }
+                    s.purchases = Purchases::default();
+                }
+                s.last_read = Some(LastRead {
+                    game_time_ms: snap.game_time_ms,
+                    event_count: snap.event_count,
+                    kills: snap.objective_kills.clone(),
+                });
                 s.purchases.observe(&snap.inventory);
+                // Once per game: which mode it is and whether it is timed,
+                // so a player missing timers can see why in the log.
+                let mode = s.live.as_ref().map(|l| &l.game_mode);
+                if mode != Some(&snap.game_mode) {
+                    tracing::info!(
+                        game_mode = %snap.game_mode,
+                        objective_timers = snap.summoners_rift,
+                        "reading the live game"
+                    );
+                }
             }
             s.live = snapshot;
         }

@@ -1,6 +1,6 @@
 {
   "name": "Ranked mid Lux, full game",
-  "description": "Lobby, champ select (hover then lock Lux mid), loading screen, then a short game: starter items bought, gold rising, a component bought, end of game.",
+  "description": "Lobby, champ select (hover then lock Lux mid), loading screen, then a short game: starter items bought, gold rising, the blue side takes the first dragon at 6:02 (dragon timer on the minimap), a component bought, end of game.",
   "setup": { "ownedPageCount": 2 },
   "steps": [
     { "phase": "Lobby" },
@@ -21,9 +21,11 @@
     { "wait": 8000 },
     { "live": { "gold": 0, "items": [[1056, 1], [2003, 1]], "gameTime": 60 } },
     { "wait": 8000 },
-    { "live": { "gold": 900, "items": [[1056, 1], [2003, 1]], "gameTime": 400, "level": 6 } },
+    { "live": { "gold": 900, "items": [[1056, 1], [2003, 1]], "gameTime": 400, "level": 6,
+                "events": [{ "EventName": "DragonKill", "EventTime": 362.4, "DragonType": "Fire", "Stolen": "False", "KillerName": "Tester" }] } },
     { "wait": 8000 },
-    { "live": { "gold": 50, "items": [[1056, 1], [1052, 1], [3340, 1]], "gameTime": 420, "level": 6 } },
+    { "live": { "gold": 50, "items": [[1056, 1], [1052, 1], [3340, 1]], "gameTime": 420, "level": 6,
+                "events": [{ "EventName": "DragonKill", "EventTime": 362.4, "DragonType": "Fire", "Stolen": "False", "KillerName": "Tester" }] } },
     { "wait": 8000 },
     { "phase": "EndOfGame" },
     { "noGame": null }

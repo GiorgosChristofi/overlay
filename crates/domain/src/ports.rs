@@ -65,6 +65,9 @@ pub struct LiveSnapshot {
     pub game_mode: String,
     /// Dragons, Elders and Barons slain so far, by either team.
     pub objective_kills: Vec<ObjectiveKill>,
+    /// How many events the game lists. It only grows during a game; a
+    /// drop means the Practice Tool reset it.
+    pub event_count: u32,
 }
 
 /// Reads the running game.

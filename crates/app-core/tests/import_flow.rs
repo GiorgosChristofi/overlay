@@ -1427,3 +1427,65 @@ async fn a_practice_tool_reset_forgets_what_was_bought() {
         [(OverlayBlockKind::Starter, vec![1056, 2003])]
     );
 }
+
+#[tokio::test]
+async fn a_reset_is_caught_even_when_the_game_answers_nothing_in_between() {
+    let h = harness(FakeLcu::default(), Settings::default());
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::InProgress))
+        .await;
+    let old_dragon = ObjectiveKill {
+        at_ms: 362_000,
+        kind: KillKind::Dragon,
+        team: Some(Team::Order),
+    };
+    h.core
+        .live_tick(Some(in_practice_tool(390_000, vec![old_dragon], vec![])));
+    assert_eq!(dragon_timer(&h), Some(662_000));
+
+    // Reset Game reloads the game: for a moment there is no game data.
+    h.core.live_tick(None);
+    h.core.live_tick(None);
+    h.core
+        .live_tick(Some(in_practice_tool(1_000, vec![old_dragon], vec![])));
+    assert_eq!(
+        dragon_timer(&h),
+        Some(300_000),
+        "the old dragon no longer counts"
+    );
+    h.core
+        .live_tick(Some(in_practice_tool(370_000, vec![old_dragon], vec![])));
+    assert_eq!(dragon_timer(&h), None, "the new game's first dragon is up");
+}
+
+#[tokio::test]
+async fn a_cleared_event_list_is_a_reset_even_if_the_clock_runs_on() {
+    let h = harness(
+        FakeLcu {
+            owned_pages: 2,
+            ..Default::default()
+        },
+        Settings::default(),
+    );
+    h.connect_and_enter_champ_select().await;
+    h.core
+        .handle(LcuEvent::ChampSelect(Some(session(99, "middle", true))))
+        .await;
+    h.core
+        .handle(LcuEvent::Phase(GameflowPhase::InProgress))
+        .await;
+    let read = |game_time_ms, event_count, items| LiveSnapshot {
+        event_count,
+        ..in_practice_tool(game_time_ms, vec![], items)
+    };
+    h.core.live_tick(Some(read(400_000, 12, vec![(1056, 1)])));
+    assert_eq!(h.overlay_items(), [(OverlayBlockKind::Starter, vec![2003])]);
+    // Same clock, but the game now lists just its GameStart.
+    h.core.live_tick(Some(read(401_000, 1, vec![])));
+    assert_eq!(
+        h.overlay_items(),
+        [(OverlayBlockKind::Starter, vec![1056, 2003])],
+        "bought items start over"
+    );
+}

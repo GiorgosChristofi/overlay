@@ -683,7 +683,10 @@ async fn the_practice_tool_gets_timers_that_follow_fast_forward_and_reset() {
         .await;
     assert_eq!(dragon_at(&t), Some(662_400));
 
-    // Reset Game: the clock restarts and the game still lists the old kill.
+    // Reset Game: the game reloads (no data for a few of this harness's
+    // 50 ms reads), then the clock restarts and it still lists the old kill.
+    app.mock.apply(&Step::NoGame);
+    tokio::time::sleep(Duration::from_millis(300)).await;
     app.mock.apply(&practice(3.0, vec![dragon.clone()]));
     let t = app.objectives_until("the reset clock", at(3_000)).await;
     assert_eq!(

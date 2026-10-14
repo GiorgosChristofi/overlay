@@ -89,6 +89,28 @@ struct State {
     last_objectives: Option<ObjectiveTimersDto>,
     /// Kills from before a Practice Tool reset, which no longer count.
     kills_before_reset: Vec<ObjectiveKill>,
+    /// The last read that had game data. Kept through reads without any
+    /// (a reset reloads the game, which answers nothing for a moment), so
+    /// the read after can still be compared with the one before.
+    last_read: Option<LastRead>,
+}
+
+#[derive(Debug, Clone)]
+struct LastRead {
+    game_time_ms: u64,
+    event_count: u32,
+    kills: Vec<ObjectiveKill>,
+}
+
+/// Why a read counts as a Practice Tool "Reset Game", if it does.
+fn reset_reason(before: &LastRead, now: &LiveSnapshot) -> Option<&'static str> {
+    if objectives::is_reset(before.game_time_ms, now.game_time_ms) {
+        Some("the game clock went back")
+    } else if now.event_count < before.event_count {
+        Some("the game's event list was cleared")
+    } else {
+        None
+    }
 }
 
 impl State {
@@ -139,6 +161,7 @@ impl State {
     fn reset_game(&mut self) {
         self.purchases = Purchases::default();
         self.kills_before_reset.clear();
+        self.last_read = None;
         self.choices = OverlayChoices::default();
         self.live = None;
     }
@@ -181,6 +204,7 @@ impl Core {
                 last_overlay: None,
                 last_objectives: None,
                 kills_before_reset: Vec::new(),
+                last_read: None,
             }),
             sources,
             settings_store,
@@ -326,21 +350,31 @@ impl Core {
                 // The Practice Tool's "Reset Game" turns the clock back: what
                 // happened before no longer counts. (Fast-forward only moves
                 // it on, which the timers follow by themselves.)
-                let previous = s
-                    .live
+                let reset = s
+                    .last_read
                     .as_ref()
-                    .map(|l| (l.game_time_ms, l.objective_kills.clone()));
-                if let Some((was_ms, kills)) = previous {
-                    if objectives::is_reset(was_ms, snap.game_time_ms) {
-                        tracing::info!(from_ms = was_ms, to_ms = snap.game_time_ms, "game reset");
-                        for kill in kills.iter().chain(&snap.objective_kills) {
-                            if !s.kills_before_reset.contains(kill) {
-                                s.kills_before_reset.push(*kill);
-                            }
+                    .and_then(|before| Some((reset_reason(before, snap)?, before.clone())));
+                if let Some((reason, before)) = reset {
+                    tracing::info!(
+                        reason,
+                        from_ms = before.game_time_ms,
+                        to_ms = snap.game_time_ms,
+                        events_before = before.event_count,
+                        events_now = snap.event_count,
+                        "game reset"
+                    );
+                    for kill in before.kills.iter().chain(&snap.objective_kills) {
+                        if !s.kills_before_reset.contains(kill) {
+                            s.kills_before_reset.push(*kill);
                         }
-                        s.purchases = Purchases::default();
                     }
+                    s.purchases = Purchases::default();
                 }
+                s.last_read = Some(LastRead {
+                    game_time_ms: snap.game_time_ms,
+                    event_count: snap.event_count,
+                    kills: snap.objective_kills.clone(),
+                });
                 s.purchases.observe(&snap.inventory);
                 // Once per game: which mode it is and whether it is timed,
                 // so a player missing timers can see why in the log.

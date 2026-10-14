@@ -56,9 +56,11 @@ traps in this Windows dev environment.
   `LoL Overlay timers`), counting on from the last game time for at most
   1.5 s (`minimap.rs`), so a stalled read never runs a timer ahead. Timed
   modes: `CLASSIC` and `PRACTICETOOL` on map 11 (`live.rs`; the mode is
-  logged once per game). A clock that steps back >5 s is a Practice Tool
-  reset: kills seen before it no longer count (the game may keep or clear
-  its event list) and purchases start over. Scuttlers get only their
+  logged once per game). A Practice Tool reset is any of: the clock
+  stepping back >5 s, the event list shrinking, or a later `GameStart`
+  event; compared with the last read that had data (the game answers
+  nothing while it reloads). Kills seen before it no longer count and
+  purchases start over; each reset is logged with its reason. Scuttlers get only their
   fixed first spawn (2:55; their spots in `minimap.rs` are community
   coordinates); overlapping labels are nudged apart (`minimap_view.rs`).
   Other normal camps cannot be timed: the public API does not report them; Porofessor

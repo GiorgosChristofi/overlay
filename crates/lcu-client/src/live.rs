@@ -184,6 +184,7 @@ pub fn parse_all_game_data(raw: &str) -> Result<Option<LiveSnapshot>, PortError>
         summoners_rift: has_rift_objectives(&data.game_data),
         game_mode: data.game_data.game_mode.chars().take(32).collect(),
         objective_kills: objective_kills(&data.events.events, &data.all_players),
+        event_count: u32::try_from(data.events.events.len()).unwrap_or(u32::MAX),
     }))
 }
 
@@ -212,8 +213,14 @@ fn game_ms(seconds: f64) -> u64 {
     ms
 }
 
+/// Epic kills since the game (re)started. A game lists one `GameStart`; if
+/// a Practice Tool reset appends another, kills before it are the old game's.
 fn objective_kills(events: &[Event], players: &[Player]) -> Vec<ObjectiveKill> {
-    events
+    let start = events
+        .iter()
+        .rposition(|e| e.name == "GameStart")
+        .unwrap_or(0);
+    events[start..]
         .iter()
         .filter_map(|e| {
             let kind = match (e.name.as_str(), e.dragon_type.as_str()) {
@@ -323,6 +330,27 @@ mod tests {
         assert!(!mode("ARAM", 12).summoners_rift);
         assert!(!mode("URF", 11).summoners_rift, "different timings");
         assert!(!mode("CLASSIC", 30).summoners_rift, "another map");
+    }
+
+    #[test]
+    fn kills_before_a_later_game_start_belong_to_the_old_game() {
+        let raw = r#"{"activePlayer":{"riotId":"Me#1"},"allPlayers":[{"riotId":"Me#1"}],
+            "events":{"Events":[
+                {"EventName":"GameStart","EventTime":0},
+                {"EventName":"DragonKill","EventTime":362,"DragonType":"Fire"},
+                {"EventName":"GameStart","EventTime":0.1},
+                {"EventName":"BaronKill","EventTime":20}]},
+            "gameData":{"gameMode":"PRACTICETOOL","mapNumber":11,"gameTime":30}}"#;
+        let s = parse_all_game_data(raw).unwrap().unwrap();
+        assert_eq!(s.event_count, 4);
+        assert_eq!(
+            s.objective_kills,
+            [ObjectiveKill {
+                at_ms: 20_000,
+                kind: KillKind::Baron,
+                team: None
+            }]
+        );
     }
 
     #[test]

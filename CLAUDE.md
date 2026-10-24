@@ -48,6 +48,23 @@ traps in this Windows dev environment.
   `/liveclientdata/allgamedata` once a second while in game
   (`apps/desktop/src/lib.rs::spawn_live_game`). The API is HTTP only (no
   websocket or push); see Open threads.
+- Objective timers: rules pure in `crates/domain/src/objectives.rs` (game
+  clock + `DragonKill`/`BaronKill` events, timings as constants); Core
+  sends `OverlayMessage::Objectives` separately from the item view, every
+  read while on the Rift and `None` once after. The overlay draws them in a
+  second egui viewport (`apps/overlay/src/minimap_view.rs`, window title
+  `LoL Overlay timers`), counting on from the last game time for at most
+  1.5 s (`minimap.rs`), so a stalled read never runs a timer ahead. Timed
+  modes: `CLASSIC` and `PRACTICETOOL` on map 11 (`live.rs`; the mode is
+  logged once per game). A Practice Tool reset is any of: the clock
+  stepping back >5 s, the event list shrinking, or a later `GameStart`
+  event; compared with the last read that had data (the game answers
+  nothing while it reloads). Kills seen before it no longer count and
+  purchases start over; each reset is logged with its reason. Scuttlers get only their
+  fixed first spawn (2:55; their spots in `minimap.rs` are community
+  coordinates); overlapping labels are nudged apart (`minimap_view.rs`).
+  Other normal camps cannot be timed: the public API does not report them; Porofessor
+  gets them from Overwolf's own `jungle_camps` game events.
 - IPC DTOs live in `ipc-types`; `cargo test` regenerates `ui/src/bindings`
   (ts-rs). CI fails if bindings are stale, so commit them. Overlay DTOs are
   serde-only (no TypeScript).
@@ -116,6 +133,12 @@ Unknown endpoints answer 404 and are recorded as `known: false`.
   (`OPEN` starts expanded; `ANY_WINDOW` treats any focused window as the
   game). Without `OPEN` it shows the compact strip (needs `gold` set).
   The message must include every `OverlayViewDto` field, or it is ignored.
+- The minimap timers: send an `{"type":"objectives","view":{...}}` line
+  (see the `ipc-types` test) once a second with a rising `gameTimeMs`;
+  `LOL_OVERLAY_OPEN=1` shows the fitting frame. Its window title is
+  `LoL Overlay timers`. On Linux the overlay builds with
+  `--features eframe/x11` and runs under Xvfb with software GL (needs
+  `libxkbcommon-x11-0`); only `input.rs`'s Windows path test fails there.
 - Screenshots: find the window titled `LoL Overlay items` with Win32
   `EnumWindows` + `GetWindowRect` from PowerShell and `CopyFromScreen`
   that rect only (don't capture the user's whole screen). The user has 3
@@ -182,8 +205,12 @@ Unknown endpoints answer 404 and are recorded as `known: false`.
 
 ## Open threads (offered, not done)
 - Live polling: switch from `allgamedata` (grows with events) to
-  `/liveclientdata/activeplayer` + `/liveclientdata/playeritems?riotId=`;
-  optionally poll faster while the column is open.
+  `/liveclientdata/activeplayer` + `/liveclientdata/playeritems?riotId=`
+  + `/liveclientdata/eventdata?eventID=<next>` (only new events, for the
+  objective timers) + `/liveclientdata/gamestats` (the clock); optionally
+  poll faster while the column is open.
+- Objective timings (`objectives.rs`) come from patch-note summaries for
+  26.1; the dragon's 5:00/5:00 was not confirmed for 2026. Check in a game.
 - OP.GG region and tier as user settings (now constants in
   `apps/desktop/src/lib.rs` and `crates/opgg/src/lib.rs`).
 - `OverlayHost::send` respawns a crashed overlay on every view update with

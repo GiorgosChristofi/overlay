@@ -1,7 +1,9 @@
 //! What the overlay shows and how. Pure, so the rules are tested without a
 //! window.
 
+use crate::minimap::Timers;
 use ipc_types::{OverlayMessage, OverlayViewDto};
+use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Input {
@@ -41,6 +43,20 @@ pub struct OverlayState {
     pub focused: bool,
     /// `None` until a build is known.
     pub view: Option<OverlayViewDto>,
+    /// Objective timers, `None` outside a Summoner's Rift game.
+    pub objectives: Option<Timers>,
+}
+
+/// How the minimap layer is drawn right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MinimapMode {
+    /// Nothing drawn; clicks go through.
+    Hidden,
+    /// The timers only; clicks go through to the minimap.
+    Timers,
+    /// The column is open: a frame the player drags and resizes to fit the
+    /// minimap, with markers on the pits to line it up.
+    Adjust,
 }
 
 impl OverlayState {
@@ -55,6 +71,29 @@ impl OverlayState {
                 self.view = None;
                 self.expanded = false;
             }
+            // Timers have nothing to do with the build: `Clear` keeps them.
+            Input::Message(OverlayMessage::Objectives(timers)) => {
+                self.objectives = timers.map(|dto| Timers {
+                    dto,
+                    received: Instant::now(),
+                });
+            }
+        }
+    }
+
+    pub fn minimap_mode(&self) -> MinimapMode {
+        if !self.focused {
+            MinimapMode::Hidden
+        } else if self.expanded {
+            MinimapMode::Adjust
+        } else if self
+            .objectives
+            .as_ref()
+            .is_some_and(|t| !t.dto.timers.is_empty())
+        {
+            MinimapMode::Timers
+        } else {
+            MinimapMode::Hidden
         }
     }
 
@@ -132,6 +171,7 @@ mod tests {
             expanded: false,
             focused: true,
             view: Some(view(true)),
+            objectives: None,
         }
     }
 
@@ -219,6 +259,54 @@ mod tests {
         let mut s = in_game();
         s.apply(Input::Message(OverlayMessage::Items(Box::new(view(true)))));
         assert_eq!(s.mode(), Mode::Compact);
+    }
+
+    fn timers(timers: Vec<ipc_types::ObjectiveTimerDto>) -> OverlayMessage {
+        OverlayMessage::Objectives(Some(ipc_types::ObjectiveTimersDto {
+            game_time_ms: 90_000,
+            timers,
+        }))
+    }
+
+    fn dragon() -> ipc_types::ObjectiveTimerDto {
+        ipc_types::ObjectiveTimerDto {
+            pit: ipc_types::PitDto::Dragon,
+            label: "Dragon".into(),
+            spawn_at_ms: 300_000,
+        }
+    }
+
+    #[test]
+    fn minimap_timers_show_in_game_and_pass_clicks_through() {
+        let mut s = in_game();
+        assert_eq!(s.minimap_mode(), MinimapMode::Hidden, "no timers yet");
+        s.apply(Input::Message(timers(vec![dragon()])));
+        assert_eq!(s.minimap_mode(), MinimapMode::Timers);
+        s.apply(Input::Focus(false));
+        assert_eq!(s.minimap_mode(), MinimapMode::Hidden);
+        s.apply(Input::Focus(true));
+        s.apply(Input::Message(timers(vec![])));
+        assert_eq!(s.minimap_mode(), MinimapMode::Hidden, "every monster is up");
+    }
+
+    #[test]
+    fn opening_the_column_lets_the_minimap_frame_be_fitted() {
+        let mut s = in_game();
+        s.apply(Input::TogglePressed);
+        assert_eq!(s.minimap_mode(), MinimapMode::Adjust, "even before timers");
+        s.apply(Input::EscPressed);
+        assert_eq!(s.minimap_mode(), MinimapMode::Hidden);
+    }
+
+    #[test]
+    fn timers_outlive_a_cleared_build_and_end_with_the_game() {
+        let mut s = in_game();
+        s.apply(Input::Message(timers(vec![dragon()])));
+        s.apply(Input::Message(OverlayMessage::Clear));
+        assert_eq!(s.minimap_mode(), MinimapMode::Timers);
+        s.apply(Input::Message(OverlayMessage::Objectives(None)));
+        assert_eq!(s.objectives, None);
+        assert_eq!(s.minimap_mode(), MinimapMode::Hidden);
     }
 
     #[test]

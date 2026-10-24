@@ -3,6 +3,8 @@
 //! and nothing (with clicks passing through) outside the game.
 
 use crate::commands;
+use crate::minimap::Placement;
+use crate::minimap_view::{self, MinimapLayer};
 use crate::state::{Input, Mode, OverlayState};
 use eframe::egui::{
     self, Align, Color32, CornerRadius, CursorIcon, Frame, Image, Layout, Margin, Rect, RichText,
@@ -16,12 +18,12 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 // Palette of the main window (`ui/src/styles/tokens.css`).
-const BG: Color32 = Color32::from_rgb(0x13, 0x22, 0x2a);
+pub(crate) const BG: Color32 = Color32::from_rgb(0x13, 0x22, 0x2a);
 const SURFACE: Color32 = Color32::from_rgb(0x1b, 0x2f, 0x38);
 const LINE: Color32 = Color32::from_rgb(0x2a, 0x43, 0x50);
-const TEXT: Color32 = Color32::from_rgb(0xe4, 0xed, 0xef);
-const MUTED: Color32 = Color32::from_rgb(0x8b, 0xa3, 0xab);
-const ACCENT: Color32 = Color32::from_rgb(0xa5, 0x8c, 0xff);
+pub(crate) const TEXT: Color32 = Color32::from_rgb(0xe4, 0xed, 0xef);
+pub(crate) const MUTED: Color32 = Color32::from_rgb(0x8b, 0xa3, 0xab);
+pub(crate) const ACCENT: Color32 = Color32::from_rgb(0xa5, 0x8c, 0xff);
 const GOOD: Color32 = Color32::from_rgb(0x6f, 0xd3, 0xa0);
 const GOLD: Color32 = Color32::from_rgb(0xf0, 0xb8, 0x66);
 const BAD: Color32 = Color32::from_rgb(0xf0, 0x7a, 0x6e);
@@ -42,19 +44,32 @@ pub struct OverlayApp {
     /// No position remembered yet: move the window to [`FIRST_POSITION`],
     /// giving up at this deadline.
     place_until: Option<Instant>,
+    /// Objective timers over the game's minimap.
+    minimap: MinimapLayer,
 }
 
+/// How often running timers are redrawn: often enough that a second never
+/// shows late, rarely enough to cost nothing in game.
+const TIMER_REPAINT: Duration = Duration::from_millis(250);
+
 impl OverlayApp {
-    pub fn new(inputs: Receiver<Input>, open: bool, place_window: bool) -> Self {
+    pub fn new(
+        inputs: Receiver<Input>,
+        open: bool,
+        place_window: bool,
+        minimap: Option<Placement>,
+    ) -> Self {
         Self {
             state: OverlayState {
                 expanded: open,
                 focused: open,
                 view: None,
+                objectives: None,
             },
             inputs,
             passthrough: None,
             place_until: place_window.then(|| Instant::now() + PLACEMENT_WINDOW),
+            minimap: MinimapLayer::new(minimap),
         }
     }
 }
@@ -531,6 +546,12 @@ impl eframe::App for OverlayApp {
         [0.0; 4] // fully transparent window
     }
 
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if let Some(placement) = self.minimap.placement {
+            storage.set_string(minimap_view::STORAGE_KEY, placement.to_storage());
+        }
+    }
+
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.place_window(ui);
         while let Ok(input) = self.inputs.try_recv() {
@@ -574,6 +595,20 @@ impl eframe::App for OverlayApp {
             if current.is_none_or(|h| (h - height).abs() > 1.0) {
                 ui.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(WIDTH, height)));
             }
+        }
+
+        let shown = self
+            .state
+            .objectives
+            .as_ref()
+            .map(|t| t.shown(Instant::now()))
+            .unwrap_or_default();
+        let monitor = ui.input(|i| i.viewport().monitor_size);
+        let ctx = ui.ctx().clone();
+        self.minimap
+            .show(&ctx, self.state.minimap_mode(), &shown, monitor);
+        if !shown.is_empty() {
+            ctx.request_repaint_after(TIMER_REPAINT);
         }
     }
 }
